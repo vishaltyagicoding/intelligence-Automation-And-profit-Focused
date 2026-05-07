@@ -1,0 +1,55 @@
+DOCKER DESKTOP WSL INTEGRATION FIX
+==================================
+
+ERROR: WSL integration with Ubuntu-24.04 stopped
+CAUSE: Docker Desktop can't find /mnt/wsl/docker-desktop/docker-desktop-user-distro
+
+SOLUTION 1: Restart Docker Desktop
+-----------------------------------
+1. Right-click Docker Desktop icon in system tray
+2. Click "Quit Docker Desktop"
+3. Wait 10 seconds
+4. Start Docker Desktop again
+5. Wait for it to fully start (whale icon stops animating)
+
+SOLUTION 2: Reset WSL Integration
+----------------------------------
+1. Open Docker Desktop
+2. Go to Settings > Resources > WSL Integration
+3. UNCHECK "Ubuntu-24.04"
+4. Click "Apply & Restart"
+5. Wait for Docker to restart
+6. Go back to Settings > Resources > WSL Integration
+7. CHECK "Ubuntu-24.04" again
+8. Click "Apply & Restart"
+
+SOLUTION 3: Restart WSL (if above doesn't work)
+------------------------------------------------
+Run in PowerShell (as Administrator):
+
+wsl --shutdown
+wsl --list --verbose
+
+Wait 10 seconds, then start Docker Desktop
+
+SOLUTION 4: Reinstall Docker Desktop WSL Components
+----------------------------------------------------
+1. Quit Docker Desktop
+2. Run in PowerShell (as Administrator):
+   wsl --unregister docker-desktop
+   wsl --unregister docker-desktop-data
+3. Start Docker Desktop (it will reinstall WSL components)
+
+SOLUTION 5: Use Docker without WSL (temporary workaround)
+----------------------------------------------------------
+If you need to work NOW and can't fix WSL:
+
+1. Open Docker Desktop Settings
+2. Go to General
+3. UNCHECK "Use the WSL 2 based engine"
+4. Click "Apply & Restart"
+5. Docker will use Hyper-V instead (slower but works)
+
+After fixing, verify with:
+docker compose ps
+docker compose up -d

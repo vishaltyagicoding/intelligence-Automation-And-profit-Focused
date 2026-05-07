@@ -1,0 +1,341 @@
+"""
+Reversal Entry Zones — Python Port
+====================================
+Direct conversion of the TradingView Pine Script "Reversal Entry Zones" indicator.
+
+DO NOT MODIFY THIS LOGIC - IT IS THE EXACT TRADINGVIEW PINE SCRIPT CONVERSION.
+
+Workflow:
+1) Track running highs/lows from selected price source (High/Low or EMA-smoothed)
+2) Confirm a pivot only when price reverses by a minimum threshold
+3) Mark the reversal level as bullish or bearish
+4) Draw core zone, outer zone, and optional projected zone
+5) Optionally connect confirmed reversals with a synthetic path
+6) Summarise current state in a status panel
+"""
+from __future__ import annotations
+import math
+from dataclasses import dataclass
+from typing import List, Optional
+import numpy as np
+import pandas as pd
+
+
+@dataclass
+class ReversalEvent:
+    """Stores a single confirmed reversal pivot."""
+    bar_index: int
+    price: float
+    is_bullish: bool          # True = low pivot (bullish reversal)
+    core_half: float          # half-height of core box
+    outer_half: float         # half-height of outer box
+    zone_half: float          # half-height of projected zone
+
+
+@dataclass
+class Config:
+    """All user-configurable parameters (mirrors Pine Script inputs)."""
+    # Confirmation
+    confirm_bars: int = 0       # extra bars before confirming pivot
+    
+    # Sensitivity
+    preset: str = "Low"         # "Low" | "Very Low"
+    
+    # Reversal Calculation
+    calc_mode: str = "Average"  # "Average" | "High/Low"
+    avg_len: int = 5            # EMA length for smoothed source
+    atr_len: int = 5            # ATR period
+    custom_abs: float = 0.05    # minimum absolute reversal size
+    
+    # Zone Display
+    show_reversal_labels: bool = True
+    show_zones: bool = True
+    max_zones: int = 8
+    zone_extend: int = 10       # bars to extend zone boxes (display only)
+    zone_thickness_pct: float = 0.03  # projected zone thickness %
+    
+    # Reversal Lines
+    level_extend: int = 10      # bars to extend level lines (display only)
+    max_levels: int = 12
+    
+    # Synthetic Path
+    show_synthetic_path: bool = True
+    max_synthetic_lines: int = 40
+
+
+def _ema(series: pd.Series, length: int) -> pd.Series:
+    """Exponential moving average (same as ta.ema in Pine)."""
+    return series.ewm(span=length, adjust=False).mean()
+
+
+def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
+    """Average True Range."""
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    return tr.ewm(span=length, adjust=False).mean()
+
+
+class ReversalZoneCalculator:
+    """
+    Python port of the Pine Script "Reversal Entry Zones" indicator.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with columns 'open', 'high', 'low', 'close'.
+        Index should be a DatetimeIndex or integer range.
+    config : Config, optional
+        Parameter object. Defaults to Config() which mirrors Pine defaults.
+    """
+    
+    def __init__(self, 
+                 preset="Low",
+                 calc_mode="Average",
+                 avg_len=5,
+                 atr_len=5,
+                 custom_abs=0.05,
+                 confirm_bars=0,
+                 zone_thickness_pct=0.03,
+                 max_zones=8):
+        self.cfg = Config(
+            preset=preset,
+            calc_mode=calc_mode,
+            avg_len=avg_len,
+            atr_len=atr_len,
+            custom_abs=custom_abs,
+            confirm_bars=confirm_bars,
+            zone_thickness_pct=zone_thickness_pct,
+            max_zones=max_zones,
+        )
+        
+        # Outputs populated by run()
+        self.reversals: List[ReversalEvent] = []
+        self._atr_series: pd.Series = pd.Series(dtype=float)
+        
+        # Internal swing-tracking state
+        self._run_high: float = math.nan
+        self._run_low: float = math.nan
+        self._run_high_raw: float = math.nan
+        self._run_low_raw: float = math.nan
+        self._run_high_bar: int = -1
+        self._run_low_bar: int = -1
+        self._swing_dir: int = 1   # 1 = tracking high, -1 = tracking low
+    
+    @property
+    def _preset_atr_mult(self) -> float:
+        return 3.5 if self.cfg.preset == "Very Low" else 2.8
+    
+    @property
+    def _preset_pct(self) -> float:
+        return 0.02 if self.cfg.preset == "Very Low" else 0.015
+    
+    def _build_sources(self, df: pd.DataFrame) -> tuple:
+        """
+        Returns (hi_base, lo_base, hi_raw, lo_raw) with confirm_bars shift applied.
+        
+        Pine logic:
+        hiBase = calcMode == "High/Low" ? high : ema(high, avgLen)
+        loBase = calcMode == "High/Low" ? low  : ema(low,  avgLen)
+        hiRef    = hiBase[confirmBars]
+        loRef    = loBase[confirmBars]
+        hiRawRef = high[confirmBars]
+        loRawRef = low [confirmBars]
+        """
+        cb = self.cfg.confirm_bars
+        
+        if self.cfg.calc_mode == "High/Low":
+            hi_base = df["high"]
+            lo_base = df["low"]
+        else:
+            hi_base = _ema(df["high"], self.cfg.avg_len)
+            lo_base = _ema(df["low"],  self.cfg.avg_len)
+        
+        hi_ref     = hi_base.shift(cb)
+        lo_ref     = lo_base.shift(cb)
+        hi_raw_ref = df["high"].shift(cb)
+        lo_raw_ref = df["low"].shift(cb)
+        
+        return hi_ref, lo_ref, hi_raw_ref, lo_raw_ref
+    
+    def process_ohlcv_data(self, df: pd.DataFrame) -> dict:
+        """
+        Execute the full pivot-detection pass over df.
+        Returns dict with zones, path_segments, status, config.
+        """
+        self.reversals.clear()
+        
+        df = df.copy()
+        if not isinstance(df.index, pd.DatetimeIndex):
+            if 'timestamp' in df.columns:
+                df = df.set_index('timestamp')
+        
+        # Pre-compute ATR and threshold series
+        self._atr_series = _atr(df["high"], df["low"], df["close"], self.cfg.atr_len)
+        hi_ref, lo_ref, hi_raw_ref, lo_raw_ref = self._build_sources(df)
+        
+        # Reset swing state
+        self._run_high  = math.nan
+        self._run_low   = math.nan
+        self._run_high_raw = math.nan
+        self._run_low_raw  = math.nan
+        self._run_high_bar = -1
+        self._run_low_bar  = -1
+        self._swing_dir = 1
+        
+        n = len(df)
+        for i in range(n):
+            hi  = hi_ref.iloc[i]
+            lo  = lo_ref.iloc[i]
+            hir = hi_raw_ref.iloc[i]
+            lor = lo_raw_ref.iloc[i]
+            atr_now = self._atr_series.iloc[i]
+            close_now = df["close"].iloc[i]
+            
+            if pd.isna(hi) or pd.isna(lo):
+                continue
+            
+            # reversal threshold  (mirrors Pine: math.max of three values)
+            threshold = max(
+                close_now * self._preset_pct / 100.0,
+                self.cfg.custom_abs,
+                self._preset_atr_mult * atr_now,
+            )
+            
+            actual_bar = i - self.cfg.confirm_bars  # the bar the pivot belongs to
+            
+            # ── initialise on first valid bar ────────────────────────────────
+            if math.isnan(self._run_high):
+                self._run_high     = hi
+                self._run_low      = lo
+                self._run_high_raw = hir
+                self._run_low_raw  = lor
+                self._run_high_bar = actual_bar
+                self._run_low_bar  = actual_bar
+                self._swing_dir    = 1
+                continue
+            
+            # ── tracking upswing (looking for bearish reversal) ───────────────
+            if self._swing_dir == 1:
+                if hi > self._run_high:
+                    self._run_high     = hi
+                    self._run_high_raw = hir
+                    self._run_high_bar = actual_bar
+                
+                if (self._run_high - lo) >= threshold:
+                    # confirmed HIGH pivot → bearish reversal signal
+                    self._emit_reversal(
+                        bar_index     = self._run_high_bar,
+                        center_price  = self._run_high_raw,
+                        is_bullish    = False,
+                        atr_now       = atr_now,
+                        zone_center   = self._run_high_raw,
+                        timestamp     = df.index[max(0, self._run_high_bar)]
+                    )
+                    
+                    # flip direction, reset low tracker
+                    self._swing_dir    = -1
+                    self._run_low      = lo
+                    self._run_low_raw  = lor
+                    self._run_low_bar  = actual_bar
+            
+            # ── tracking downswing (looking for bullish reversal) ─────────────
+            else:
+                if lo < self._run_low:
+                    self._run_low     = lo
+                    self._run_low_raw = lor
+                    self._run_low_bar = actual_bar
+                
+                if (hi - self._run_low) >= threshold:
+                    # confirmed LOW pivot → bullish reversal signal
+                    self._emit_reversal(
+                        bar_index     = self._run_low_bar,
+                        center_price  = self._run_low_raw,
+                        is_bullish    = True,
+                        atr_now       = atr_now,
+                        zone_center   = self._run_low_raw,
+                        timestamp     = df.index[max(0, self._run_low_bar)]
+                    )
+                    
+                    # flip direction, reset high tracker
+                    self._swing_dir    = 1
+                    self._run_high     = hi
+                    self._run_high_raw = hir
+                    self._run_high_bar = actual_bar
+        
+        # Build output
+        zones = []
+        for r in self.reversals[-self.cfg.max_zones:]:
+            zones.append({
+                'bar_index': r.bar_index,
+                'center_price': r.price,
+                'outer_top': r.price + r.outer_half,
+                'outer_bottom': r.price - r.outer_half,
+                'core_top': r.price + r.core_half,
+                'core_bottom': r.price - r.core_half,
+                'is_bullish': r.is_bullish,
+                'label_text': 'BUY' if r.is_bullish else 'SELL',
+                'reversal_time': r.timestamp if hasattr(r, 'timestamp') else df.index[r.bar_index],
+                'timestamp': r.timestamp if hasattr(r, 'timestamp') else df.index[r.bar_index],
+            })
+        
+        path_segments = []
+        revs = self.reversals[-self.cfg.max_synthetic_lines:]
+        for i in range(len(revs) - 1):
+            r1 = revs[i]
+            r2 = revs[i + 1]
+            path_segments.append({
+                'start_bar': r1.bar_index,
+                'end_bar': r2.bar_index,
+                'start_price': r1.price,
+                'end_price': r2.price,
+                'start_time': r1.timestamp if hasattr(r1, 'timestamp') else df.index[r1.bar_index],
+                'end_time': r2.timestamp if hasattr(r2, 'timestamp') else df.index[r2.bar_index],
+            })
+        
+        last_signal = 'NONE'
+        tracking = 'NONE'
+        if self.reversals:
+            last = self.reversals[-1]
+            last_signal = 'BUY' if last.is_bullish else 'SELL'
+            tracking = 'Monitoring Bullish Reversal' if self._swing_dir == -1 else 'Monitoring Bearish Reversal'
+        
+        return {
+            'zones': zones,
+            'path_segments': path_segments,
+            'status': {
+                'last_signal': last_signal,
+                'tracking': tracking,
+            },
+            'config': {
+                'preset': self.cfg.preset,
+                'calc_mode': self.cfg.calc_mode,
+                'max_zones': self.cfg.max_zones,
+            }
+        }
+    
+    def _emit_reversal(self,
+                       bar_index: int,
+                       center_price: float,
+                       is_bullish: bool,
+                       atr_now: float,
+                       zone_center: float,
+                       timestamp=None):
+        """Build a ReversalEvent and append it to self.reversals."""
+        core_half  = max(atr_now * 0.12, abs(center_price) * 0.00015)
+        outer_half = core_half * 2.15
+        zone_half  = (zone_center * self.cfg.zone_thickness_pct / 100.0) / 2.0
+        
+        evt = ReversalEvent(
+            bar_index  = max(bar_index, 0),
+            price      = center_price,
+            is_bullish = is_bullish,
+            core_half  = core_half,
+            outer_half = outer_half,
+            zone_half  = zone_half,
+        )
+        evt.timestamp = timestamp
+        self.reversals.append(evt)

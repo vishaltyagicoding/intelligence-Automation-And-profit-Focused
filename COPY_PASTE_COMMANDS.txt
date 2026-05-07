@@ -1,0 +1,109 @@
+═══════════════════════════════════════════════════════════════════
+🚀 COPY-PASTE COMMANDS - Model Setup
+═══════════════════════════════════════════════════════════════════
+
+STEP 1: Download from Kaggle
+─────────────────────────────────────────────────────────────────
+1. Go to your Kaggle notebook
+2. Click "Output" tab
+3. Download "best_model.pth"
+4. It will be in your Downloads folder
+
+
+STEP 2: Copy Model to Project (Choose ONE method)
+─────────────────────────────────────────────────────────────────
+
+METHOD A: PowerShell (Recommended)
+───────────────────────────────────
+Copy-Item "$env:USERPROFILE\Downloads\best_model.pth" -Destination "models\production\model.pth"
+
+
+METHOD B: Command Prompt
+───────────────────────────────────
+copy "%USERPROFILE%\Downloads\best_model.pth" "models\production\model.pth"
+
+
+METHOD C: File Explorer (Manual)
+───────────────────────────────────
+1. Open Downloads folder
+2. Find "best_model.pth"
+3. Copy it (Ctrl+C)
+4. Navigate to: models\production\
+5. Paste it (Ctrl+V)
+6. Rename to "model.pth"
+
+
+STEP 3: Verify File Exists
+─────────────────────────────────────────────────────────────────
+Test-Path models\production\model.pth
+
+Should return: True ✅
+
+
+STEP 4: Load Model into Django
+─────────────────────────────────────────────────────────────────
+python manage.py load_model --checkpoint models/production/model.pth
+
+Expected output:
+✅ Model loaded successfully!
+✅ Accuracy: 75.00%
+✅ Ready for production
+
+
+STEP 5: Start Services
+─────────────────────────────────────────────────────────────────
+docker-compose up -d
+
+
+STEP 6: Test Model
+─────────────────────────────────────────────────────────────────
+curl http://localhost:8000/api/ai/status/
+
+
+═══════════════════════════════════════════════════════════════════
+📍 FILE LOCATIONS
+═══════════════════════════════════════════════════════════════════
+
+Downloaded file:
+C:\Users\YourUsername\Downloads\best_model.pth
+
+Target location:
+D:\intelligence-Automation-And-profit-Focused\intelligence-Automation-And-profit-Focused\models\production\model.pth
+
+Short path (from project root):
+models\production\model.pth
+
+
+═══════════════════════════════════════════════════════════════════
+✅ CHECKLIST
+═══════════════════════════════════════════════════════════════════
+
+[ ] Downloaded best_model.pth from Kaggle
+[ ] Copied to models\production\model.pth
+[ ] Verified file exists (Test-Path returns True)
+[ ] Loaded with python manage.py load_model
+[ ] Started services with docker-compose up -d
+[ ] Tested with curl http://localhost:8000/api/ai/status/
+
+
+═══════════════════════════════════════════════════════════════════
+🆘 TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════
+
+Problem: "File not found"
+Solution: Make sure file is at: models\production\model.pth
+
+Problem: "Permission denied"
+Solution: Run PowerShell as Administrator
+
+Problem: "Model failed to load"
+Solution: Check file size (should be 5-10 MB)
+
+
+═══════════════════════════════════════════════════════════════════
+🎯 YOU'RE DONE!
+═══════════════════════════════════════════════════════════════════
+
+Your 75% accuracy model is now loaded and ready for production!
+
+Next: Follow DEPLOYMENT_CHECKLIST.md for paper trading setup.

@@ -1,0 +1,128 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+static/
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+.env.aws
+
+# SSH Keys (NEVER COMMIT!)
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+*.ppk
+
+# AWS Credentials (NEVER COMMIT!)
+.aws/
+credentials
+config
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+celerybeat-schedule.db
+
+# Redis
+dump.rdb
+*.rdb
+
+# ML Models
+*.h5
+*.pkl
+*.pth
+models/checkpoints/
+
+# Node/Frontend
+node_modules/
+.next/
+out/
+.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.eslintcache
+
+# Docker
+.dockerignore
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.hypothesis/
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+
+# Database dumps
+*.sql
+*.dump
+
+# Logs
+logs/
+*.log.*
+
+# Payment proof images (sensitive data)
+payment_proofs/
+
+# Temporary files
+temp/
+tmp/
+*.temp

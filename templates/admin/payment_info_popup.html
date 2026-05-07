@@ -1,0 +1,130 @@
+{% extends "admin/base_site.html" %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <h1>Payment Information Required</h1>
+    
+    <p>Activating subscription for: <strong>{{ user.username }}</strong> ({{ user.email }})</p>
+    
+    {% if messages %}
+    <ul class="messagelist">
+        {% for message in messages %}
+        <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    
+    <form method="post" enctype="multipart/form-data" id="payment-form">
+        {% csrf_token %}
+        
+        <fieldset class="module aligned">
+            <h2>Payment Details</h2>
+            
+            <div class="form-row">
+                <div>
+                    <label for="id_user_name" class="required">User Name:</label>
+                    {{ form.user_name }}
+                    {% if form.user_name.errors %}
+                        <ul class="errorlist">
+                            {% for error in form.user_name.errors %}
+                            <li>{{ error }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                    {% if form.user_name.help_text %}
+                        <p class="help">{{ form.user_name.help_text }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div>
+                    <label for="id_subscription_price" class="required">Subscription Price:</label>
+                    {{ form.subscription_price }}
+                    {% if form.subscription_price.errors %}
+                        <ul class="errorlist">
+                            {% for error in form.subscription_price.errors %}
+                            <li>{{ error }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                    {% if form.subscription_price.help_text %}
+                        <p class="help">{{ form.subscription_price.help_text }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="form-row">
+                <div>
+                    <label for="id_payment_valid_image" class="required">Payment Valid Image:</label>
+                    {{ form.payment_valid_image }}
+                    {% if form.payment_valid_image.errors %}
+                        <ul class="errorlist">
+                            {% for error in form.payment_valid_image.errors %}
+                            <li>{{ error }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
+                    {% if form.payment_valid_image.help_text %}
+                        <p class="help">{{ form.payment_valid_image.help_text }}</p>
+                    {% endif %}
+                    <div id="image-preview" style="display: none; margin-top: 10px;">
+                        <img id="preview-img" src="" alt="Preview" style="max-width: 300px; border: 1px solid #ccc;">
+                    </div>
+                </div>
+            </div>
+        </fieldset>
+        
+        <div class="submit-row">
+            <input type="submit" value="Save and Activate Subscription" class="default" />
+            <a href="{% url 'admin:users_user_change' user.pk %}" class="button cancel-link">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<script>
+// Image preview functionality
+document.getElementById('id_payment_valid_image').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            document.getElementById('preview-img').src = e.target.result;
+            document.getElementById('image-preview').style.display = 'block';
+        }
+        reader.readAsDataURL(file);
+    } else {
+        document.getElementById('image-preview').style.display = 'none';
+    }
+});
+
+// Form validation
+document.getElementById('payment-form').addEventListener('submit', function(e) {
+    const userName = document.getElementById('id_user_name').value.trim();
+    const price = document.getElementById('id_subscription_price').value;
+    const image = document.getElementById('id_payment_valid_image').files[0];
+    
+    if (!userName) {
+        alert('User Name is required');
+        e.preventDefault();
+        return false;
+    }
+    
+    if (!price || parseFloat(price) <= 0) {
+        alert('Subscription Price must be a positive number');
+        e.preventDefault();
+        return false;
+    }
+    
+    if (!image) {
+        alert('Payment Valid Image is required');
+        e.preventDefault();
+        return false;
+    }
+    
+    return true;
+});
+</script>
+{% endblock %}

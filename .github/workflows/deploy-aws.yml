@@ -1,0 +1,341 @@
+name: Deploy SmartRisk to AWS EC2
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to EC2 Ubuntu Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔑 Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 🔍 Check EC2 connection
+        run: |
+          ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }} "echo '✅ SSH connection successful'"
+
+      - name: 🛑 Stop running services
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk || true
+            sudo docker-compose down || true
+          EOF
+
+      - name: 📦 Deploy code to EC2
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            # Create project directory if not exists
+            mkdir -p ~/smartrisk
+            cd ~/smartrisk
+            
+            # Remove old code (keep .env)
+            sudo rm -rf !(.env|.env.production|.env.local)
+            
+            echo "✅ Ready for new code"
+          EOF
+          
+          # Copy all files to EC2
+          rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' --exclude '.env' \
+            -e "ssh -o StrictHostKeyChecking=no" \
+            ./ ubuntu@${{ secrets.EC2_HOST }}:~/smartrisk/
+
+      - name: ⚙️ Configure environment
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            
+            # Create .env file if not exists
+            if [ ! -f .env ]; then
+              cat > .env << 'ENVFILE'
+          # Django Settings
+          SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+          DEBUG=False
+          ALLOWED_HOSTS=${{ secrets.EC2_HOST }},localhost,127.0.0.1
+          
+          # Database
+          DB_NAME=smartrisk_db
+          DB_USER=smartrisk_user
+          DB_PASSWORD=SmartRisk@2026!
+          DB_HOST=db
+          DB_PORT=5432
+          
+          # Redis
+          REDIS_HOST=redis
+          REDIS_PORT=6379
+          
+          # Email Configuration
+          EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+          EMAIL_HOST=smtp.gmail.com
+          EMAIL_PORT=587
+          EMAIL_USE_TLS=True
+          EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
+          EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
+          DEFAULT_FROM_EMAIL=${{ secrets.EMAIL_HOST_USER }}
+          
+          # Trading APIs
+          ALPACA_API_KEY=your_alpaca_key
+          ALPACA_SECRET_KEY=your_alpaca_secret
+          ALPACA_BASE_URL=https://paper-api.alpaca.markets
+          
+          # Frontend URL
+          NEXT_PUBLIC_API_URL=http://${{ secrets.EC2_HOST }}:8000
+          NEXT_PUBLIC_WS_URL=ws://${{ secrets.EC2_HOST }}:8001
+          ENVFILE
+              echo "✅ .env file created"
+            else
+              echo "✅ .env file already exists"
+            fi
+          EOF
+
+      - name: 🐳 Build Docker images
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            sudo docker-compose build --no-cache
+            echo "✅ Docker images built"
+          EOF
+
+      - name: 🚀 Start services
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            sudo docker-compose up -d
+            echo "✅ Services started"
+          EOF
+
+      - name: ⏳ Wait for services to be ready
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            echo "Waiting 45 seconds for services to initialize..."
+            sleep 45
+            
+            echo "Service status:"
+            cd ~/smartrisk
+            sudo docker-compose ps
+          EOF
+
+      - name: 🗄️ Run database migrations
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            sudo docker-compose exec -T django python manage.py migrate --noinput
+            echo "✅ Migrations completed"
+          EOF
+
+      - name: 📁 Collect static files
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            sudo docker-compose exec -T django python manage.py collectstatic --noinput
+            echo "✅ Static files collected"
+          EOF
+
+      - name: 👤 Create superuser
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            sudo docker-compose exec -T django python manage.py shell << 'PYEOF'
+          from django.contrib.auth import get_user_model
+          User = get_user_model()
+          
+          # Create alberttyagi123@gmail.com
+          if not User.objects.filter(email='alberttyagi123@gmail.com').exists():
+              user = User.objects.create_superuser(
+                  email='alberttyagi123@gmail.com',
+                  username='alberttyagi',
+                  password='SmartRisk@2026!',
+                  first_name='Albert',
+                  last_name='Tyagi'
+              )
+              print('✅ alberttyagi123@gmail.com superuser created')
+          else:
+              print('✅ alberttyagi123@gmail.com already exists')
+          
+          # Create pythonbyvishal@gmail.com
+          if not User.objects.filter(email='pythonbyvishal@gmail.com').exists():
+              user = User.objects.create_superuser(
+                  email='pythonbyvishal@gmail.com',
+                  username='pythonbyvishal',
+                  password='SmartRisk@2026!',
+                  first_name='Vishal',
+                  last_name='Python'
+              )
+              print('✅ pythonbyvishal@gmail.com superuser created')
+          else:
+              print('✅ pythonbyvishal@gmail.com already exists')
+          PYEOF
+          EOF
+
+      - name: ⏰ Configure Celery Beat tasks
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            sudo docker-compose exec -T django python << 'PYEOF'
+          import os, sys, django
+          os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'neuraltrade.settings')
+          django.setup()
+          
+          from django_celery_beat.models import PeriodicTask, IntervalSchedule, CrontabSchedule
+          
+          # 1. Trial expiration task (every 1 minute)
+          interval, _ = IntervalSchedule.objects.get_or_create(
+              every=1,
+              period=IntervalSchedule.MINUTES,
+          )
+          
+          task, created = PeriodicTask.objects.update_or_create(
+              name='check-expired-subscriptions',
+              defaults={
+                  'task': 'users.tasks.check_and_expire_subscriptions',
+                  'interval': interval,
+                  'enabled': True,
+              }
+          )
+          
+          if created:
+              print('✅ Trial expiration task created (every 1 minute)')
+          else:
+              print('✅ Trial expiration task updated (every 1 minute)')
+          
+          # 2. Signal update task (every 15 minutes)
+          cron, _ = CrontabSchedule.objects.get_or_create(
+              minute='*/15',
+              hour='*',
+              day_of_week='*',
+              day_of_month='*',
+              month_of_year='*',
+              timezone='Asia/Kolkata'
+          )
+          
+          signal_task, created = PeriodicTask.objects.update_or_create(
+              name='update-all-recent-signals-every-15min',
+              defaults={
+                  'task': 'reversal_zones.tasks.update_all_recent_signals',
+                  'crontab': cron,
+                  'enabled': True,
+              }
+          )
+          
+          if created:
+              print('✅ Signal update task created (every 15 minutes)')
+          else:
+              print('✅ Signal update task updated (every 15 minutes)')
+          
+          # Remove old 30-minute task if exists
+          try:
+              old_task = PeriodicTask.objects.get(name='update-all-recent-signals-every-30min')
+              old_task.delete()
+              print('✅ Old 30-minute task removed')
+          except:
+              pass
+          PYEOF
+          EOF
+
+      - name: 🔄 Restart services
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            sudo docker-compose restart celery_beat celery_worker
+            echo "✅ Celery services restarted"
+          EOF
+
+      - name: 🏥 Health checks
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            
+            echo "=== Service Status ==="
+            sudo docker-compose ps
+            
+            echo ""
+            echo "=== Django Logs (last 20 lines) ==="
+            sudo docker-compose logs --tail=20 django
+            
+            echo ""
+            echo "=== Celery Beat Logs (last 20 lines) ==="
+            sudo docker-compose logs --tail=20 celery_beat
+            
+            echo ""
+            echo "=== Celery Worker Logs (last 20 lines) ==="
+            sudo docker-compose logs --tail=20 celery_worker
+            
+            echo ""
+            echo "=== Redis Check ==="
+            sudo docker-compose exec -T redis redis-cli ping
+            
+            echo ""
+            echo "=== PostgreSQL Check ==="
+            sudo docker-compose exec -T db pg_isready -U smartrisk_user
+          EOF
+
+      - name: 📊 Deployment Summary
+        run: |
+          echo "=========================================================================="
+          echo "✅ DEPLOYMENT SUCCESSFUL!"
+          echo "=========================================================================="
+          echo ""
+          echo "🌐 Application URLs:"
+          echo "   Frontend:  http://${{ secrets.EC2_HOST }}"
+          echo "   API:       http://${{ secrets.EC2_HOST }}:8000"
+          echo "   Admin:     http://${{ secrets.EC2_HOST }}:8000/admin/"
+          echo "   WebSocket: ws://${{ secrets.EC2_HOST }}:8001"
+          echo ""
+          echo "👤 Admin Credentials:"
+          echo "   Email:     alberttyagi123@gmail.com"
+          echo "   Email:     pythonbyvishal@gmail.com"
+          echo "   Password:  SmartRisk@2026!"
+          echo ""
+          echo "⏰ Scheduled Tasks:"
+          echo "   ✅ Trial expiration check: Every 1 minute"
+          echo "   ✅ Signal updates: Every 15 minutes"
+          echo ""
+          echo "🐳 Services Running:"
+          echo "   ✅ PostgreSQL (TimescaleDB)"
+          echo "   ✅ Redis"
+          echo "   ✅ Django (Daphne ASGI)"
+          echo "   ✅ Celery Worker"
+          echo "   ✅ Celery Beat"
+          echo "   ✅ Next.js Frontend"
+          echo "   ✅ Nginx"
+          echo ""
+          echo "=========================================================================="
+
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+    
+    steps:
+      - name: ❌ Deployment Failed
+        run: |
+          echo "=========================================================================="
+          echo "❌ DEPLOYMENT FAILED!"
+          echo "=========================================================================="
+          echo ""
+          echo "Please check the logs above for error details."
+          echo "Common issues:"
+          echo "  - SSH connection failed"
+          echo "  - Docker build errors"
+          echo "  - Database migration errors"
+          echo "  - Service startup failures"
+          echo ""
+          echo "To debug on EC2:"
+          echo "  ssh ubuntu@${{ secrets.EC2_HOST }}"
+          echo "  cd ~/smartrisk"
+          echo "  sudo docker-compose logs [service-name]"
+          echo ""
+          echo "=========================================================================="

@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+      to bottom,
+      transparent,
+      rgb(var(--background-end-rgb))
+    )
+    rgb(var(--background-start-rgb));
+}
+
+:root {
+  --background-start-rgb: 15, 12, 41;
+  --background-end-rgb: 36, 36, 62;
+  --foreground-rgb: 255, 255, 255;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background-start-rgb: 15, 12, 41;
+    --background-end-rgb: 36, 36, 62;
+    --foreground-rgb: 255, 255, 255;
+  }
+}
+
+/* Hide TradingView watermark */
+div[class*="watermark"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+a[href*="tradingview"] {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+svg[class*="tv-"] {
+  display: none !important;
+}

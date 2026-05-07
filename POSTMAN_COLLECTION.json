@@ -1,0 +1,684 @@
+{
+	"info": {
+		"name": "NeuralTrade API - Complete Collection",
+		"description": "Complete API collection for NeuralTrade AI Trading Platform\n\nSuperuser Credentials:\nUsername: admin\nPassword: admin123\nEmail: admin@neuraltrade.com",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Authentication",
+			"item": [
+				{
+					"name": "Login - Get JWT Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('access_token', jsonData.access);",
+									"    pm.collectionVariables.set('refresh_token', jsonData.refresh);",
+									"    console.log('Access token saved:', jsonData.access);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"admin\",\n    \"password\": \"admin123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/token/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "token", ""]
+						},
+						"description": "Login with superuser credentials to get JWT access and refresh tokens"
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refresh\": \"{{refresh_token}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/token/refresh/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "token", "refresh", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Setup 2FA",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/auth/2fa/setup/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "2fa", "setup", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Verify 2FA",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"token\": \"123456\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/2fa/verify/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "2fa", "verify", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Disable 2FA",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/auth/2fa/disable/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "2fa", "disable", ""]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "2. Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/",
+							"host": ["{{base_url}}"],
+							"path": ["health", ""]
+						},
+						"description": "Simple health check for Docker"
+					},
+					"response": []
+				},
+				{
+					"name": "System Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/trading/status/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "status", ""]
+						},
+						"description": "Detailed system status with Redis, database, and service health"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3. Trading",
+			"item": [
+				{
+					"name": "List Trades",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/trading/trades/?limit=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "trades", ""],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "symbol",
+									"value": "BTCUSDT",
+									"disabled": true
+								},
+								{
+									"key": "status",
+									"value": "EXECUTED",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Trade",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"symbol\": \"BTCUSDT\",\n    \"side\": \"BUY\",\n    \"quantity\": 0.01,\n    \"market\": \"CRYPTO\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/trading/trades/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "trades", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Trade Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/trading/trades/1/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "trades", "1", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Trading Signals",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/trading/signals/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "trading", "signals", ""]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4. AI Agents",
+			"item": [
+				{
+					"name": "Analyze Symbol (All 3 Agents)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"symbol\": \"BTCUSDT\",\n    \"market\": \"CRYPTO\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/ai/analyze/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "ai", "analyze", ""]
+						},
+						"description": "Trigger AI analysis by all 3 agents (Analyst, Oracle, Disciplinarian)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Agent Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/ai/agent-status/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "ai", "agent-status", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Audit Logs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/ai/audit-logs/?limit=10",
+							"host": ["{{base_url}}"],
+							"path": ["api", "ai", "audit-logs", ""],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Learning Metrics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/ai/learning/metrics/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "ai", "learning", "metrics", ""]
+						},
+						"description": "Get continuous learning performance metrics"
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger Learning from Trade",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"trade_id\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/ai/learning/trigger/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "ai", "learning", "trigger", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Check Overfitting",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/ai/learning/overfitting/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "ai", "learning", "overfitting", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Agent Learning Stats",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/ai/learning/agent-stats/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "ai", "learning", "agent-stats", ""]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "5. Wallet",
+			"item": [
+				{
+					"name": "Get Wallet Balance",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/wallet/wallets/balance/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "wallet", "wallets", "balance", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Initiate Deposit",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 1000.00,\n    \"payment_method\": \"RAZORPAY\",\n    \"currency\": \"USD\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/wallet/deposit/initiate/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "wallet", "deposit", "initiate", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Initiate Withdrawal",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 500.00,\n    \"withdrawal_method\": \"BANK_TRANSFER\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/wallet/withdrawal/initiate/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "wallet", "withdrawal", "initiate", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Transaction History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/wallet/transactions/?limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["api", "wallet", "transactions", ""],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "transaction_type",
+									"value": "DEPOSIT",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "6. Market Data",
+			"item": [
+				{
+					"name": "Get Market Data",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/market/data/?symbol=BTCUSDT",
+							"host": ["{{base_url}}"],
+							"path": ["api", "market", "data", ""],
+							"query": [
+								{
+									"key": "symbol",
+									"value": "BTCUSDT"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Historical Data",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/market/historical/?symbol=BTCUSDT&interval=4h&limit=100",
+							"host": ["{{base_url}}"],
+							"path": ["api", "market", "historical", ""],
+							"query": [
+								{
+									"key": "symbol",
+									"value": "BTCUSDT"
+								},
+								{
+									"key": "interval",
+									"value": "4h"
+								},
+								{
+									"key": "limit",
+									"value": "100"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "7. Users",
+			"item": [
+				{
+					"name": "Get User Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/users/profile/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", "profile", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update User Profile",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@neuraltrade.com\",\n    \"first_name\": \"Admin\",\n    \"last_name\": \"User\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/users/profile/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", "profile", ""]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Register New User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"testuser\",\n    \"email\": \"test@example.com\",\n    \"password\": \"testpass123\",\n    \"password2\": \"testpass123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/users/register/",
+							"host": ["{{base_url}}"],
+							"path": ["api", "users", "register", ""]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

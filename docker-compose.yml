@@ -133,8 +133,6 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://54.183.178.141}
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://54.183.178.141}
     networks:
       - neuraltrade_network
     restart: unless-stopped

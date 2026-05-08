@@ -58,7 +58,7 @@ jobs:
             echo "✅ Ready for new code"
           EOF
           
-          # Copy all files to EC2
+          # Copy all files to EC2 (exclude .env to preserve existing config)
           rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' --exclude '.env' \
             -e "ssh -o StrictHostKeyChecking=no" \
             ./ ubuntu@${{ secrets.EC2_HOST }}:~/smartrisk/
@@ -68,9 +68,14 @@ jobs:
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
             
-            # Create .env file if not exists
+            # Use .env.production if .env doesn't exist
             if [ ! -f .env ]; then
-              cat > .env << 'ENVFILE'
+              if [ -f .env.production ]; then
+                echo "✅ Using .env.production file"
+                cp .env.production .env
+              else
+                echo "⚠️ Creating default .env file"
+                cat > .env << 'ENVFILE'
           # Django Settings
           SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
           DEBUG=False
@@ -101,13 +106,17 @@ jobs:
           ALPACA_SECRET_KEY=your_alpaca_secret
           ALPACA_BASE_URL=https://paper-api.alpaca.markets
           
-          # Frontend URL
-          NEXT_PUBLIC_API_URL=https://smartriskfx.com
-          NEXT_PUBLIC_WS_URL=wss://smartriskfx.com
+          # Binance API (Binance.US for production)
+          BINANCE_API_KEY=
+          BINANCE_API_SECRET=
+          
+          # Frontend URLs (HTTP only - no SSL configured)
+          NEXT_PUBLIC_API_URL=http://54.183.178.141
+          NEXT_PUBLIC_WS_URL=ws://54.183.178.141
           ENVFILE
-              echo "✅ .env file created"
+              fi
             else
-              echo "✅ .env file already exists"
+              echo "✅ .env file already exists - keeping existing configuration"
             fi
           EOF
 

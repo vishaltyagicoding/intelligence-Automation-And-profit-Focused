@@ -1,288 +1,314 @@
-# 🚀 NeuralTrade - AWS Deployment Guide
+# 🚀 SmartRisk - Production Deployment
 
-## Quick Links
+## 📖 Quick Start
 
-- 📖 **[AWS Quick Start](AWS_QUICK_START.md)** - 5-minute overview
-- 📚 **[Complete Deployment Guide](AWS_DEPLOYMENT_COMPLETE_GUIDE.md)** - Detailed step-by-step
-- ✅ **[Pre-Deployment Checklist](PRE_DEPLOYMENT_CHECKLIST.md)** - What to check before deploying
-- 📊 **[Final Status](FINAL_DEPLOYMENT_STATUS.md)** - Current deployment readiness
+This is your **production-ready** SmartRisk trading platform. Everything is configured and automated. You just need to:
 
----
-
-## 🎯 Current Status
-
-✅ **READY FOR AWS DEPLOYMENT**
-
-- All code tested and working
-- Docker images optimized
-- CI/CD pipeline configured
-- Documentation complete
-- Security configured
-- Performance optimized
+1. **Update EC2_HOST secret** with your new EC2 IP
+2. **Run setup commands** on EC2 (one time only)
+3. **Push to GitHub** - deployment happens automatically
 
 ---
 
-## ⚡ Quick Deploy (3 Commands)
+## 📚 Documentation Files
 
+### For Deployment:
+1. **QUICK_DEPLOYMENT_GUIDE.md** - ⚡ Start here! 3 simple steps
+2. **PRODUCTION_DEPLOYMENT_CHECKLIST.md** - 📋 Complete checklist
+3. **FINAL_VERIFICATION.md** - ✅ Pre-deployment verification
+
+### For Reference:
+- **AWS_SECURITY_GROUP_PORTS.md** - Security group configuration
+- **ADMIN_PERMISSIONS_GUIDE.md** - Admin access guide
+- **API_DOCUMENTATION.md** - API endpoints
+
+---
+
+## ⚡ Quick Deployment (3 Steps)
+
+### Step 1: Update GitHub Secret (2 min)
+```
+GitHub → Settings → Secrets → Actions → EC2_HOST → Update
+Enter your NEW EC2 IP address
+```
+
+### Step 2: Setup EC2 (5 min - ONE TIME)
 ```bash
-# 1. Verify everything is ready
-bash scripts/verify_deployment_ready.sh
+# SSH into EC2
+ssh -i your-key.pem ubuntu@YOUR_NEW_EC2_IP
 
-# 2. Set up AWS infrastructure (follow guide)
-# See AWS_DEPLOYMENT_COMPLETE_GUIDE.md
+# Run this script (copy-paste entire block):
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+sudo ln -sf /usr/local/bin/docker-compose /usr/bin/docker-compose
+sudo usermod -aG docker ubuntu
+sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw allow 8000/tcp && sudo ufw allow 8001/tcp
+sudo ufw --force enable
+mkdir -p ~/smartrisk
+docker --version && docker-compose --version
 
-# 3. Deploy!
+# IMPORTANT: Logout and login again
+exit
+# Then reconnect
+ssh -i your-key.pem ubuntu@YOUR_NEW_EC2_IP
+```
+
+### Step 3: Deploy (1 min)
+```bash
+# In your local project
+git add .
+git commit -m "Production deployment"
 git push origin main
 ```
 
----
-
-## 📋 What You Need
-
-### Before Starting
-- [ ] AWS Account with billing enabled
-- [ ] AWS CLI installed (`aws --version`)
-- [ ] Docker installed (`docker --version`)
-- [ ] GitHub account
-- [ ] 1-2 hours for initial setup
-
-### AWS Resources to Create
-- [ ] VPC with subnets
-- [ ] RDS PostgreSQL database
-- [ ] ElastiCache Redis
-- [ ] ECR repositories (2)
-- [ ] ECS cluster
-- [ ] Application Load Balancer
-- [ ] IAM roles
-- [ ] Secrets Manager secrets
+**Done! GitHub Actions deploys everything automatically.**
 
 ---
 
-## 🏗️ Architecture
+## ✅ Verify Deployment
 
+### Check GitHub Actions
 ```
-Internet → ALB → ECS (Frontend + Backend) → RDS + Redis
+GitHub → Actions tab → Watch workflow run → All steps green ✅
 ```
 
-**Services:**
-- Frontend: Next.js (Port 3000)
-- Backend: Django + Daphne (Port 8000)
-- Database: PostgreSQL (RDS)
-- Cache: Redis (ElastiCache)
-- Proxy: Nginx (Port 80)
-- Workers: Celery + Celery Beat
-
----
-
-## 💰 Cost
-
-**Estimated Monthly Cost:** $92-140
-
-**With Optimizations:** $40-70
-
-See [FINAL_DEPLOYMENT_STATUS.md](FINAL_DEPLOYMENT_STATUS.md) for breakdown.
-
----
-
-## 🔄 Deployment Flow
-
-```
-Push to GitHub
-    ↓
-GitHub Actions
-    ↓
-Run Tests
-    ↓
-Build Docker Images
-    ↓
-Push to ECR
-    ↓
-Update ECS Service
-    ↓
-✅ Live!
-```
-
----
-
-## 📚 Documentation Structure
-
-1. **Start Here**: [AWS_QUICK_START.md](AWS_QUICK_START.md)
-   - Quick overview
-   - Common issues
-   - Quick commands
-
-2. **Detailed Setup**: [AWS_DEPLOYMENT_COMPLETE_GUIDE.md](AWS_DEPLOYMENT_COMPLETE_GUIDE.md)
-   - Step-by-step AWS setup
-   - All CLI commands
-   - Configuration details
-
-3. **Pre-Flight**: [PRE_DEPLOYMENT_CHECKLIST.md](PRE_DEPLOYMENT_CHECKLIST.md)
-   - What to check before deploying
-   - Verification steps
-   - Common mistakes to avoid
-
-4. **Status**: [FINAL_DEPLOYMENT_STATUS.md](FINAL_DEPLOYMENT_STATUS.md)
-   - Current readiness
-   - What's included
-   - Testing status
-
----
-
-## 🛠️ Tools Provided
-
-### Verification Script
+### Check Services on EC2
 ```bash
-bash scripts/verify_deployment_ready.sh
+ssh ubuntu@YOUR_NEW_EC2_IP
+cd ~/smartrisk
+sudo docker-compose ps
 ```
-Checks:
-- Dependencies
-- Docker configuration
-- Environment variables
-- Frontend/Backend setup
-- CI/CD configuration
-- Documentation
 
-### Deployment Script
+Should show 7 services running:
+- ✅ neuraltrade_db (healthy)
+- ✅ neuraltrade_redis (healthy)
+- ✅ neuraltrade_django (healthy)
+- ✅ neuraltrade_celery_worker (Up)
+- ✅ neuraltrade_celery_beat (Up)
+- ✅ neuraltrade_frontend (Up)
+- ✅ neuraltrade_nginx (Up)
+
+### Test Application
+```
+Frontend: http://YOUR_EC2_IP:3000
+API: http://YOUR_EC2_IP:8000/health/
+Admin: http://YOUR_EC2_IP:8000/admin/
+```
+
+---
+
+## 🎯 What's Automated
+
+GitHub Actions automatically:
+1. ✅ Deploys code to EC2
+2. ✅ Builds Docker images
+3. ✅ Starts all services
+4. ✅ Runs database migrations
+5. ✅ Creates superuser accounts
+6. ✅ Configures scheduled tasks
+7. ✅ Runs health checks
+
+---
+
+## 🔐 Admin Access
+
+**Superuser Accounts:**
+- Email: alberttyagi123@gmail.com
+- Email: pythonbyvishal@gmail.com
+- Password: SmartRisk@2026!
+
+**Admin Panel:**
+- URL: http://YOUR_EC2_IP:8000/admin/
+
+---
+
+## ⏰ Scheduled Tasks
+
+Automatically configured:
+- ✅ Trial expiration check: Every 1 minute
+- ✅ Signal updates: Every 15 minutes
+
+---
+
+## 🐳 Services
+
+7 Docker containers:
+1. **PostgreSQL** (TimescaleDB) - Database
+2. **Redis** - Cache & message broker
+3. **Django** (Daphne ASGI) - Backend API
+4. **Celery Worker** - Background tasks
+5. **Celery Beat** - Task scheduler
+6. **Next.js** - Frontend
+7. **Nginx** - Reverse proxy & SSL
+
+---
+
+## 📋 GitHub Secrets Required
+
+Make sure these 7 secrets are configured:
+
+1. **AWS_ACCESS_KEY_ID**
+2. **AWS_SECRET_ACCESS_KEY**
+3. **EC2_HOST** ⚠️ UPDATE WITH NEW IP!
+4. **EC2_SSH_KEY** (entire .pem file)
+5. **DJANGO_SECRET_KEY**: `b%jb$1*+ege5^u+kn7q83zs=65e1(6n-txkg--k3#*tvf1e4ex`
+6. **EMAIL_HOST_USER**
+7. **EMAIL_HOST_PASSWORD**
+
+---
+
+## 🚨 Troubleshooting
+
+### Django Won't Start
 ```bash
-bash scripts/aws_deploy.sh
+sudo docker-compose logs django --tail=100
+sudo docker-compose up -d django
 ```
-Does:
-- Builds Docker images
-- Pushes to ECR
-- Updates ECS service
-- Waits for stability
 
----
-
-## ✅ What's Working
-
-### Backend
-- ✅ User authentication (JWT)
-- ✅ 3-day free trial
-- ✅ Trading signals (TradingView logic)
-- ✅ Signal alternation (BUY → SELL → BUY)
-- ✅ WebSocket support
-- ✅ Celery tasks
-- ✅ Admin panel
-
-### Frontend
-- ✅ Landing page
-- ✅ Dashboard with live signals
-- ✅ Signal history
-- ✅ Authentication pages
-- ✅ Real-time countdown
-- ✅ Responsive design
-
-### Infrastructure
-- ✅ Nginx reverse proxy
-- ✅ Rate limiting
-- ✅ Security headers
-- ✅ Health checks
-- ✅ Auto-restart
-
----
-
-## 🔐 Security
-
-- ✅ JWT authentication
-- ✅ Password hashing
-- ✅ CORS configured
-- ✅ Rate limiting (100 req/min)
-- ✅ Security headers
-- ✅ HTTPS support
-- ✅ No hardcoded secrets
-- ✅ AWS Secrets Manager
-
----
-
-## 🎯 Next Steps
-
-1. **Read Quick Start**
-   ```bash
-   cat AWS_QUICK_START.md
-   ```
-
-2. **Run Verification**
-   ```bash
-   bash scripts/verify_deployment_ready.sh
-   ```
-
-3. **Follow Deployment Guide**
-   - Open `AWS_DEPLOYMENT_COMPLETE_GUIDE.md`
-   - Follow step by step
-   - Takes 1-2 hours (one-time)
-
-4. **Deploy**
-   ```bash
-   git push origin main
-   ```
-
-5. **Monitor**
-   - GitHub Actions tab
-   - AWS ECS Console
-   - CloudWatch Logs
-
----
-
-## 🆘 Need Help?
-
-### Common Issues
-
-**Issue: Docker build fails**
+### Check All Logs
 ```bash
-# Check Docker is running
-docker ps
-
-# Check Dockerfile syntax
-docker build -f Dockerfile.backend -t test .
+sudo docker-compose logs --tail=50
 ```
 
-**Issue: AWS CLI not configured**
+### Restart Everything
 ```bash
-# Configure AWS CLI
-aws configure
-
-# Test connection
-aws sts get-caller-identity
+sudo docker-compose restart
 ```
 
-**Issue: GitHub Actions fails**
+### Rebuild Everything
 ```bash
-# Check secrets are configured
-# GitHub → Settings → Secrets → Actions
-
-# Required secrets:
-# - AWS_ACCESS_KEY_ID
-# - AWS_SECRET_ACCESS_KEY
-# - AWS_REGION
+sudo docker-compose down
+sudo docker-compose build
+sudo docker-compose up -d
 ```
 
-### Get Support
+---
 
-1. Check documentation files
-2. Review error logs
-3. Check AWS service status
-4. Review GitHub Actions logs
+## 🎉 Features
+
+### User Features:
+- ✅ User registration with email verification
+- ✅ 3-day free trial (auto-expires)
+- ✅ Real-time trading signals
+- ✅ Live market charts (15M, 1H, 4H, 1D)
+- ✅ Signal alerts
+- ✅ Trading history
+- ✅ Subscription management
+
+### Admin Features:
+- ✅ Full Django admin panel
+- ✅ User management
+- ✅ Subscription management
+- ✅ Signal monitoring
+- ✅ System health checks
+
+### Technical Features:
+- ✅ WebSocket support for real-time data
+- ✅ Celery for background tasks
+- ✅ Redis for caching
+- ✅ TimescaleDB for time-series data
+- ✅ Docker containerization
+- ✅ Automated CI/CD with GitHub Actions
+- ✅ Health checks for all services
+- ✅ Automatic migrations
+- ✅ SSL ready (Nginx configured)
 
 ---
 
-## 📞 Resources
+## 📊 System Requirements
 
-- **AWS Console**: https://console.aws.amazon.com/
-- **GitHub Actions**: https://github.com/features/actions
-- **Docker Docs**: https://docs.docker.com/
-- **Django Docs**: https://docs.djangoproject.com/
-- **Next.js Docs**: https://nextjs.org/docs
+### EC2 Instance:
+- **Type:** t2.medium or better
+- **OS:** Ubuntu 24.04 LTS
+- **Storage:** 30GB minimum
+- **Memory:** 4GB minimum
+
+### Ports Required:
+- 22 (SSH)
+- 80 (HTTP)
+- 443 (HTTPS)
+- 8000 (Django API)
+- 8001 (WebSocket)
 
 ---
 
-## 🎉 You're Ready!
+## 🔄 Future Updates
 
-Your NeuralTrade application is production-ready and can be deployed to AWS with confidence!
+After initial deployment, to update:
 
-**Start with**: [AWS_QUICK_START.md](AWS_QUICK_START.md)
+```bash
+# Just push to GitHub
+git add .
+git commit -m "Update description"
+git push origin main
+```
+
+GitHub Actions will automatically:
+1. Deploy new code
+2. Rebuild containers
+3. Run migrations
+4. Restart services
+
+**No need to SSH into EC2!**
 
 ---
 
-*Last Updated: May 5, 2026*  
-*Version: 1.0.0*
+## 📞 Contact
+
+**Admin Emails:**
+- alberttyagi123@gmail.com
+- smarttriskfx@gmail.com
+
+**Support:**
+- pythonbyvishal@gmail.com
+
+---
+
+## 🎯 Project Status
+
+- ✅ ML dependencies removed
+- ✅ Brand changed to SmartRisk
+- ✅ Trial system working
+- ✅ Signal updates automated
+- ✅ GitHub Actions configured
+- ✅ Docker optimized
+- ✅ All services configured
+- ✅ Health checks working
+- ✅ Admin accounts configured
+- ✅ Email verification working
+
+**Status: PRODUCTION READY** 🚀
+
+---
+
+## 📝 Important Notes
+
+### DO NOT Run on EC2:
+- ❌ Manual Docker commands (GitHub Actions handles this)
+- ❌ Manual migrations (automated)
+- ❌ Manual superuser creation (automated)
+- ❌ `curl "https://..."` commands (not needed)
+
+### You ONLY Need:
+1. ✅ One-time EC2 setup (Docker, Docker Compose, firewall)
+2. ✅ Update EC2_HOST secret
+3. ✅ `git push origin main`
+
+### After First Deployment:
+- Future updates: Just `git push`
+- No SSH needed
+- Everything automated
+
+---
+
+**Ready to deploy? Follow QUICK_DEPLOYMENT_GUIDE.md** 🚀
+
+Good luck! You've got this! 💪

@@ -74,7 +74,7 @@ jobs:
           # Django Settings
           SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
           DEBUG=False
-          ALLOWED_HOSTS=smartriskfx.com,www.smartriskfx.com,${{ secrets.EC2_HOST }},localhost,127.0.0.1
+          ALLOWED_HOSTS=smartriskfx.com,www.smartriskfx.com,54.183.178.141,localhost,127.0.0.1
           
           # Database
           DB_NAME=smartrisk_db

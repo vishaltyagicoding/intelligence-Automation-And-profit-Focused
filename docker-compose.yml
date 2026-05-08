@@ -41,13 +41,12 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: neuraltrade_django
-    command: /app/scripts/start_server.sh
+    command: bash /app/scripts/start_server.sh
     volumes:
-      - .:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
-      - ./models:/app/models  # Mount models directory
-      - ./logs:/app/logs      # Mount logs directory
+      - django_models:/app/models  # Persistent volume for models
+      - django_logs:/app/logs      # Persistent volume for logs
     ports:
       - "8000:8000"
     env_file:

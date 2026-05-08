@@ -36,19 +36,16 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p logs staticfiles media models/production models/backups
 
-# Make scripts executable (must be done before switching user)
+# Make scripts executable
 RUN chmod +x /app/scripts/*.sh && \
     chmod +x /app/scripts/start_server.sh
 
 # Collect static files (ignore errors if not ready)
 RUN python manage.py collectstatic --noinput 2>/dev/null || true
 
-# Create a non-root user for security
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/logs /app/staticfiles /app/media /app/models/production /app/models/backups && \
+    chmod -R 755 /app
 
 EXPOSE 8000
 
@@ -56,4 +53,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health/ || exit 1
 
-CMD ["/app/scripts/start_server.sh"]
+CMD ["bash", "/app/scripts/start_server.sh"]

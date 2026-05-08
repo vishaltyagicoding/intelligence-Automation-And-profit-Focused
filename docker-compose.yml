@@ -169,6 +169,8 @@ volumes:
   redis_data:
   static_volume:
   media_volume:
+  django_models:
+  django_logs:
 
 networks:
   neuraltrade_network:

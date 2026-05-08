@@ -312,15 +312,15 @@ LOGGING = {
 
 # Security Settings (Production)
 if not DEBUG:
-    SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = False  # Disabled - using HTTP only (no SSL configured yet)
+    SESSION_COOKIE_SECURE = False  # Disabled for HTTP
+    CSRF_COOKIE_SECURE = False  # Disabled for HTTP
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'SAMEORIGIN'  # Changed from DENY to allow admin panel to work
-    SECURE_HSTS_SECONDS = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
+    SECURE_HSTS_SECONDS = 0  # Disabled for HTTP
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False  # Disabled for HTTP
+    SECURE_HSTS_PRELOAD = False  # Disabled for HTTP
 
 # ── Celery Beat: auto-calculate 30-day reversal signal history daily ──────────
 from celery.schedules import crontab

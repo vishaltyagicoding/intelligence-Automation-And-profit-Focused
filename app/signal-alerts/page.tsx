@@ -71,7 +71,7 @@ export default function SignalAlertsPage() {
     setErrorMessage('');
 
     try {
-      const token = localStorage.getItem('auth_token');
+      const token = localStorage.getItem('access_token');
       const response = await fetch(`/api/signal-alerts/`, {
         method: 'POST',
         headers: {

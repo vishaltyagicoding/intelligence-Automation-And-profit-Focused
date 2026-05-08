@@ -129,3 +129,6 @@ payment_proofs/
 temp/
 tmp/
 *.temp
+
+# Internal documentation (not for GitHub)
+GITHUB_ACTIONS_FIX.md

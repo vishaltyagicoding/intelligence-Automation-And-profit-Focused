@@ -13,7 +13,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# Ignore Python lib directories but not Next.js lib
+**/venv/lib/
+**/env/lib/
+**/ENV/lib/
 lib64/
 parts/
 sdist/

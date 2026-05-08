@@ -12,13 +12,14 @@ logger = logging.getLogger(__name__)
 
 class BinanceClientWrapper:
     """
-    Wrapper for Binance API client with error handling.
+    Wrapper for Binance.US API client with error handling.
     """
     
     def __init__(self):
         self.client = Client(
             api_key=settings.BINANCE_API_KEY,
-            api_secret=settings.BINANCE_API_SECRET
+            api_secret=settings.BINANCE_API_SECRET,
+            tld='us'  # Use Binance.US
         )
     
     def get_ticker_price(self, symbol):

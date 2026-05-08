@@ -77,16 +77,17 @@ def auto_login_shoonya(self):
 @shared_task(bind=True, max_retries=3)
 def refresh_binance_token(self):
     """
-    Refresh Binance API session token.
+    Refresh Binance.US API session token.
     Scheduled every 6 hours via Celery Beat.
     """
     try:
-        logger.info("Refreshing Binance token...")
+        logger.info("Refreshing Binance.US token...")
         
-        # Initialize Binance client
+        # Initialize Binance.US client
         client = BinanceClient(
             api_key=settings.BINANCE_API_KEY,
-            api_secret=settings.BINANCE_API_SECRET
+            api_secret=settings.BINANCE_API_SECRET,
+            tld='us'  # Use Binance.US
         )
         
         # Test connection and get server time

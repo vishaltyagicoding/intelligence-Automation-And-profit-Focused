@@ -18,6 +18,10 @@ from django.conf import settings
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 
+# Binance.US API endpoint
+BINANCE_US_API_URL = "https://api.binance.us"
+BINANCE_US_WS_URL = "wss://stream.binance.us:9443"
+
 from .models import MarketSignal
 import pandas as pd
 from reversal_zones.signal_filter import run_filtered_calculator
@@ -154,14 +158,16 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         while retry_count < max_retries:
             try:
                 if not self.binance_client:
+                    # Use Binance.US API endpoint
                     self.binance_client = await AsyncClient.create(
                         api_key=settings.BINANCE_API_KEY or None,
                         api_secret=settings.BINANCE_API_SECRET or None,
+                        tld='us'  # Use Binance.US
                     )
                 
                 self.bsm = BinanceSocketManager(self.binance_client)
                 self.stream_task = asyncio.create_task(self.stream_binance_data())
-                logger.info("Binance stream started successfully for %s at %s", self.asset, self.timeframe)
+                logger.info("Binance.US stream started successfully for %s at %s", self.asset, self.timeframe)
                 return
             except Exception as exc:
                 retry_count += 1

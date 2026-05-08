@@ -115,8 +115,15 @@ jobs:
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
-            sudo docker-compose build --no-cache
-            echo "✅ Docker images built"
+            echo "Building Docker images... This may take 5-10 minutes on first run."
+            
+            if sudo docker-compose build --no-cache 2>&1 | tee /tmp/docker-build.log; then
+              echo "✅ Docker images built successfully"
+            else
+              echo "❌ Docker build failed. Showing last 100 lines of build log:"
+              tail -100 /tmp/docker-build.log
+              exit 1
+            fi
           EOF
 
       - name: 🚀 Start services
@@ -130,11 +137,43 @@ jobs:
       - name: ⏳ Wait for services to be ready
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            echo "Waiting 45 seconds for services to initialize..."
-            sleep 45
-            
-            echo "Service status:"
             cd ~/smartrisk
+            
+            echo "Waiting for services to start..."
+            echo "This may take 2-3 minutes for first-time setup..."
+            
+            # Wait for database to be healthy
+            for i in {1..60}; do
+              if sudo docker-compose ps db | grep -q "healthy"; then
+                echo "✅ Database is healthy"
+                break
+              fi
+              echo "Waiting for database... ($i/60)"
+              sleep 5
+            done
+            
+            # Wait for Redis to be healthy
+            for i in {1..30}; do
+              if sudo docker-compose ps redis | grep -q "healthy"; then
+                echo "✅ Redis is healthy"
+                break
+              fi
+              echo "Waiting for Redis... ($i/30)"
+              sleep 2
+            done
+            
+            # Wait for Django to be healthy
+            for i in {1..60}; do
+              if sudo docker-compose ps django | grep -q "healthy"; then
+                echo "✅ Django is healthy"
+                break
+              fi
+              echo "Waiting for Django... ($i/60)"
+              sleep 5
+            done
+            
+            echo ""
+            echo "=== Final Service Status ==="
             sudo docker-compose ps
           EOF
 
@@ -142,6 +181,15 @@ jobs:
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
+            
+            # Check if Django is running
+            if ! sudo docker-compose ps django | grep -q "Up"; then
+              echo "❌ Django service is not running. Checking logs..."
+              sudo docker-compose logs --tail=50 django
+              exit 1
+            fi
+            
+            echo "Running database migrations..."
             sudo docker-compose exec -T django python manage.py migrate --noinput
             echo "✅ Migrations completed"
           EOF
@@ -158,6 +206,14 @@ jobs:
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
+            
+            # Check if Django is running
+            if ! sudo docker-compose ps django | grep -q "Up"; then
+              echo "❌ Django service is not running. Skipping superuser creation."
+              exit 1
+            fi
+            
+            echo "Creating superuser accounts..."
             sudo docker-compose exec -T django python manage.py shell << 'PYEOF'
           from django.contrib.auth import get_user_model
           User = get_user_model()

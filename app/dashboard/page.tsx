@@ -49,6 +49,33 @@ export default function Page() {
     }
   }, [isAuthenticated, loading, user, router]);
 
+  // Fetch initial prices immediately via REST API (no waiting for WebSocket)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const fetchInitialPrices = async () => {
+      const ASSET_TO_BINANCE: Record<string, string> = {
+        'XAUUSD': 'PAXGUSDT',
+      };
+
+      for (const asset of WATCHLIST_ASSETS) {
+        try {
+          const symbol = ASSET_TO_BINANCE[asset] ?? asset.replace('USD', 'USDT');
+          const res = await fetch(`https://api.binance.us/api/v3/ticker/price?symbol=${symbol}`);
+          const data = await res.json();
+          if (data.price) {
+            const price = parseFloat(data.price);
+            setWatchlistPrices((prev) => ({ ...prev, [asset]: price }));
+          }
+        } catch (error) {
+          console.error(`Failed to fetch initial price for ${asset}:`, error);
+        }
+      }
+    };
+
+    fetchInitialPrices();
+  }, [isAuthenticated]);
+
   // WebSocket connections - only when authenticated
   useEffect(() => {
     if (!isAuthenticated) return;

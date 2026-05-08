@@ -227,7 +227,7 @@ export default function ChartComponent({
   useEffect(() => {
     setLastPrice(null);
     setSignalStatus(null);
-    setSigLoading(false);
+    setSigLoading(true); // Show loading immediately to hide label repositioning
     chartStartTimeRef.current = 0; // Reset until new candles load
 
     // Restore or create marker map for this asset+timeframe
@@ -237,7 +237,9 @@ export default function ChartComponent({
     }
     markersRef.current = markerCacheRef.current.get(cacheKey)!;
 
+    // Clear chart data immediately to prevent old asset's data from showing
     seriesRef.current?.setData([]);
+    seriesRef.current?.setMarkers([]); // Clear markers immediately to prevent jumping
     // Do NOT clear markers here — we restore from markerCacheRef immediately above
     // and flushMarkers() will re-apply them after new candle data loads
 
@@ -685,12 +687,6 @@ export default function ChartComponent({
               <div className="mt-0.5 text-slate-500 truncate">{signalStatus.tracking}</div>
             </div>
           )}
-
-          {sigLoading && (
-            <div className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-cyan-400 animate-pulse">
-              Loading signals…
-            </div>
-          )}
         </div>
       </div>
 
@@ -742,6 +738,16 @@ export default function ChartComponent({
 
       {/* Chart */}
       <div className="relative h-[600px]">
+        {/* Loading overlay - hides label repositioning */}
+        {sigLoading && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
+            <div className="text-center">
+              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent"></div>
+              <p className="mt-3 text-sm text-cyan-400">Loading chart data...</p>
+            </div>
+          </div>
+        )}
+
         <div className={subscriptionActive
           ? 'h-full w-full'
           : 'pointer-events-none h-full w-full select-none blur-sm'

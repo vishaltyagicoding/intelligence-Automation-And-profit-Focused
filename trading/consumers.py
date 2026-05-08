@@ -178,7 +178,11 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         logger.error("Failed to start Binance stream for %s after %d attempts", self.asset, max_retries)
 
     async def stream_binance_data(self):
-        """Stream kline data for the selected timeframe with keepalive and 10m aggregation support."""
+        """Stream kline data for the selected timeframe with REST API fallback for stale data."""
+        last_price_update = {}  # Track last unique price per asset
+        stale_count = 0
+        max_stale = 3  # Switch to REST API after 3 stale updates
+        
         try:
             # Use kline stream for the selected interval
             async with self.bsm.kline_socket(self.binance_symbol, interval=self.binance_interval) as stream:
@@ -191,9 +195,24 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                 
                 while True:
                     try:
-                        # Wait for message with 90 second timeout (klines update every ~60s)
-                        message = await asyncio.wait_for(stream.recv(), timeout=90.0)
+                        # Wait for message with 30 second timeout (check more frequently)
+                        message = await asyncio.wait_for(stream.recv(), timeout=30.0)
                         last_message_time = time.time()
+                        
+                        # Check if price is stale (same as last update)
+                        kline = message.get('k', {})
+                        current_price = float(kline.get('c', 0))
+                        
+                        if self.asset in last_price_update and last_price_update[self.asset] == current_price:
+                            stale_count += 1
+                            if stale_count >= max_stale:
+                                logger.warning("Stale WebSocket data for %s, fetching fresh price via REST API", self.asset)
+                                await self.fetch_and_broadcast_rest_price()
+                                stale_count = 0
+                                continue
+                        else:
+                            last_price_update[self.asset] = current_price
+                            stale_count = 0
                         
                         # Handle 10m aggregation (combine two 5m candles)
                         if self.timeframe == "10m":
@@ -201,20 +220,10 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                         else:
                             await self.process_kline(message)
                     except asyncio.TimeoutError:
-                        # Check if we haven't received data for too long
-                        current_time = time.time()
-                        if current_time - last_message_time > 180:
-                            logger.warning("No data received for %s in 180 seconds, reconnecting", self.asset)
-                            break
-                        # Send keepalive ping to client
-                        logger.debug("Keepalive check for %s", self.asset)
-                        try:
-                            await self.send(text_data=json.dumps({
-                                "type": "ping",
-                                "timestamp": int(current_time)
-                            }))
-                        except Exception as ping_exc:
-                            logger.error("Failed to send keepalive ping: %s", ping_exc)
+                        # Fetch fresh price via REST API on timeout
+                        logger.warning("WebSocket timeout for %s, fetching via REST API", self.asset)
+                        await self.fetch_and_broadcast_rest_price()
+                        last_message_time = time.time()
                         continue
                         
         except asyncio.CancelledError:
@@ -226,6 +235,53 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             await asyncio.sleep(5)
             if self.asset:  # Only restart if still connected
                 await self.start_binance_stream()
+
+    async def fetch_and_broadcast_rest_price(self):
+        """Fetch current price via REST API and broadcast to clients."""
+        try:
+            import aiohttp
+            
+            # Fetch ticker price from Binance.US REST API
+            url = f"https://api.binance.us/api/v3/ticker/price?symbol={self.binance_symbol.upper()}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        price = float(data.get('price', 0))
+                        
+                        if price > 0:
+                            # Create a kline-like payload
+                            timestamp = int(time.time())
+                            processed_data = {
+                                "asset": self.asset,
+                                "symbol": self.asset,
+                                "timestamp": timestamp,
+                                "time": timestamp,
+                                "open": price,
+                                "high": price,
+                                "low": price,
+                                "close": price,
+                                "price": price,
+                                "volume": 0,
+                                "is_closed": False,
+                                "timeframe": self.timeframe,
+                            }
+                            
+                            # Broadcast to clients
+                            await self.channel_layer.group_send(
+                                f"market_{self.asset}_{self.timeframe}",
+                                {
+                                    "type": "market_update",
+                                    "data": processed_data,
+                                },
+                            )
+                            
+                            logger.info("REST API price fetched for %s: %.2f", self.asset, price)
+                    else:
+                        logger.error("REST API returned status %d for %s", response.status, self.asset)
+        except Exception as exc:
+            logger.error("Error fetching REST price for %s: %s", self.asset, exc)
 
     async def process_kline(self, kline_data):
         """Process kline and broadcast normalized market payload for any timeframe."""

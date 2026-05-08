@@ -36,8 +36,9 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p logs staticfiles media models/production models/backups
 
-# Make scripts executable
-RUN chmod +x scripts/*.sh 2>/dev/null || true
+# Make scripts executable (must be done before switching user)
+RUN chmod +x /app/scripts/*.sh && \
+    chmod +x /app/scripts/start_server.sh
 
 # Collect static files (ignore errors if not ready)
 RUN python manage.py collectstatic --noinput 2>/dev/null || true

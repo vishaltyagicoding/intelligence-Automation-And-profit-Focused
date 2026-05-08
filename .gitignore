@@ -132,3 +132,16 @@ tmp/
 
 # Internal documentation (not for GitHub)
 GITHUB_ACTIONS_FIX.md
+*_FIX_*.md
+*_COMPLETE*.md
+*_SUMMARY*.md
+*_GUIDE*.md
+QUICK_*.md
+PERMANENT_*.md
+DEPLOYMENT_*.md
+LOGIN_*.md
+BINANCE_*.md
+WEBSOCKET_*.md
+AWS_*.md
+MANUAL_*.md
+PRODUCTION_*.md

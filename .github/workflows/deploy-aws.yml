@@ -41,8 +41,19 @@ jobs:
             mkdir -p ~/smartrisk
             cd ~/smartrisk
             
-            # Remove old code (keep .env)
-            sudo rm -rf !(.env|.env.production|.env.local)
+            # Backup .env files if they exist
+            if [ -f .env ]; then cp .env /tmp/.env.backup; fi
+            if [ -f .env.production ]; then cp .env.production /tmp/.env.production.backup; fi
+            if [ -f .env.local ]; then cp .env.local /tmp/.env.local.backup; fi
+            
+            # Remove all files
+            sudo rm -rf ~/smartrisk/*
+            sudo rm -rf ~/smartrisk/.[!.]*
+            
+            # Restore .env files
+            if [ -f /tmp/.env.backup ]; then mv /tmp/.env.backup ~/smartrisk/.env; fi
+            if [ -f /tmp/.env.production.backup ]; then mv /tmp/.env.production.backup ~/smartrisk/.env.production; fi
+            if [ -f /tmp/.env.local.backup ]; then mv /tmp/.env.local.backup ~/smartrisk/.env.local; fi
             
             echo "✅ Ready for new code"
           EOF

@@ -63,7 +63,7 @@ class Command(BaseCommand):
             }.get(timeframe, '1h')
             
             # Fetch latest candle data
-            url = f"https://api.binance.com/api/v3/klines"
+            url = f"https://api.binance.us/api/v3/klines"
             params = {
                 'symbol': binance_symbol,
                 'interval': binance_timeframe,

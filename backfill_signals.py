@@ -22,7 +22,7 @@ def fetch(symbol, interval, days):
     start_ts = int((time.time() - days * 86400) * 1000)
     rows, current = [], start_ts
     while current < end_ts:
-        url = (f"https://api.binance.com/api/v3/klines"
+        url = (f"https://api.binance.us/api/v3/klines"
                f"?symbol={symbol}&interval={interval}"
                f"&startTime={current}&limit=1000")
         try:

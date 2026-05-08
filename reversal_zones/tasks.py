@@ -83,7 +83,7 @@ def _fetch_range(symbol: str, interval: str, start_ts: int, end_ts: int) -> pd.D
 
     while current < end_ts:
         url = (
-            f"https://api.binance.com/api/v3/klines"
+            f"https://api.binance.us/api/v3/klines"
             f"?symbol={symbol}&interval={interval}"
             f"&startTime={current}&limit={limit}"
         )

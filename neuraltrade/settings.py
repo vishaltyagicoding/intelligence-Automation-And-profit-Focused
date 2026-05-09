@@ -15,6 +15,9 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-this-in-production'
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
+# 🔐 NEW: CSRF trusted origins for HTTPS (fixes 403 error)
+CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if os.getenv('CSRF_TRUSTED_ORIGINS') else []
+
 # Application definition
 INSTALLED_APPS = [
     'daphne',
@@ -226,7 +229,7 @@ SHOONYA_VENDOR_CODE = os.getenv('SHOONYA_VENDOR_CODE', '')
 SHOONYA_API_KEY = os.getenv('SHOONYA_API_KEY', '')
 SHOONYA_IMEI = os.getenv('SHOONYA_IMEI', '')
 
-# Delta Exchange Configuration (NEW!)
+# Delta Exchange Configuration
 DELTA_API_KEY = os.getenv('DELTA_API_KEY', '')
 DELTA_API_SECRET = os.getenv('DELTA_API_SECRET', '')
 
@@ -310,28 +313,28 @@ LOGGING = {
     },
 }
 
-# Security Settings (Production)
+# 🔒 Security Settings (Production with HTTPS)
 if not DEBUG:
-    SECURE_SSL_REDIRECT = False  # Disabled - using HTTP only (no SSL configured yet)
-    SESSION_COOKIE_SECURE = False  # Disabled for HTTP
-    CSRF_COOKIE_SECURE = False  # Disabled for HTTP
+    # Nginx already handles SSL termination, so no need to redirect again
+    SECURE_SSL_REDIRECT = False
+    # Cookies must be marked secure when using HTTPS
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    X_FRAME_OPTIONS = 'SAMEORIGIN'  # Changed from DENY to allow admin panel to work
-    SECURE_HSTS_SECONDS = 0  # Disabled for HTTP
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = False  # Disabled for HTTP
-    SECURE_HSTS_PRELOAD = False  # Disabled for HTTP
+    X_FRAME_OPTIONS = 'SAMEORIGIN'
+    SECURE_HSTS_SECONDS = 0  # HSTS handled by nginx
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
 
-# ── Celery Beat: auto-calculate 30-day reversal signal history daily ──────────
+# Celery Beat: auto-calculate 30-day reversal signal history daily
 from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = getattr(globals().get('CELERY_BEAT_SCHEDULE') or {}, 'copy', lambda: {})()
 CELERY_BEAT_SCHEDULE.update({
-    # Full 30-day recalculation — runs every day at 00:30 UTC
     'calculate-all-reversal-history-daily': {
         'task':     'reversal_zones.tasks.calculate_all_history',
         'schedule': crontab(hour=0, minute=30),
     },
-    # Incremental update — runs every 30 minutes (Pine Script logic continuously working)
     'update-all-recent-signals-every-30min': {
         'task':     'reversal_zones.tasks.update_all_recent_signals',
         'schedule': crontab(minute='*/30'),

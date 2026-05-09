@@ -15,8 +15,13 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-change-this-in-production'
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
-# 🔐 NEW: CSRF trusted origins for HTTPS (fixes 403 error)
+# CSRF trusted origins – must include HTTPS versions of your domain
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if os.getenv('CSRF_TRUSTED_ORIGINS') else []
+# Ensure HTTPS origins are always present (for security)
+if 'https://smartriskfx.com' not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append('https://smartriskfx.com')
+if 'https://www.smartriskfx.com' not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append('https://www.smartriskfx.com')
 
 # Application definition
 INSTALLED_APPS = [
@@ -45,8 +50,8 @@ INSTALLED_APPS = [
     'market_data',
     'risk_management',
     'security',
-    'api_docs',  # API Documentation
-    'signal_alerts',  # Signal Alerts
+    'api_docs',
+    'signal_alerts',
 ]
 
 MIDDLEWARE = [
@@ -195,7 +200,6 @@ SIMPLE_JWT = {
 }
 
 # CORS Configuration
-# Allow all origins since we're behind nginx proxy
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
@@ -260,16 +264,16 @@ EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', 'alberttyagi123@gmail.com')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')  # App password
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # Security Configuration
-ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', '')  # For API key encryption
-JWT_ACCESS_TOKEN_LIFETIME = 3600  # 1 hour
-JWT_REFRESH_TOKEN_LIFETIME = 86400  # 24 hours
+ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY', '')
+JWT_ACCESS_TOKEN_LIFETIME = 3600
+JWT_REFRESH_TOKEN_LIFETIME = 86400
 
 # Kill Switch Configuration
-KILL_SWITCH_LATENCY_THRESHOLD = 500  # milliseconds
+KILL_SWITCH_LATENCY_THRESHOLD = 500
 KILL_SWITCH_ENABLED = True
 
 # Logging
@@ -290,7 +294,7 @@ LOGGING = {
         'file': {
             'class': 'logging.handlers.RotatingFileHandler',
             'filename': BASE_DIR / 'logs' / 'neuraltrade.log',
-            'maxBytes': 1024 * 1024 * 100,  # 100MB
+            'maxBytes': 1024 * 1024 * 100,
             'backupCount': 10,
             'formatter': 'verbose',
         },
@@ -313,21 +317,30 @@ LOGGING = {
     },
 }
 
-# 🔒 Security Settings (Production with HTTPS)
+# 🔒 Security Settings (Production with HTTPS, no temporary workarounds)
 if not DEBUG:
-    # Nginx already handles SSL termination, so no need to redirect again
+    # Nginx handles SSL termination and HTTP → HTTPS redirect
     SECURE_SSL_REDIRECT = False
-    # Cookies must be marked secure when using HTTPS
+
+    # CRITICAL: Tell Django to trust the X-Forwarded-Proto header from Nginx
+    # This is required for Django to understand that the original request was HTTPS
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+    # All cookies must be marked secure (only sent over HTTPS)
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+
+    # Other security headers
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'SAMEORIGIN'
-    SECURE_HSTS_SECONDS = 0  # HSTS handled by nginx
+
+    # HSTS is handled by Nginx (see nginx.conf), so we disable it here
+    SECURE_HSTS_SECONDS = 0
     SECURE_HSTS_INCLUDE_SUBDOMAINS = False
     SECURE_HSTS_PRELOAD = False
 
-# Celery Beat: auto-calculate 30-day reversal signal history daily
+# Celery Beat schedules
 from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = getattr(globals().get('CELERY_BEAT_SCHEDULE') or {}, 'copy', lambda: {})()
 CELERY_BEAT_SCHEDULE.update({

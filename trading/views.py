@@ -304,14 +304,19 @@ def get_signal_history(request, symbol):
     }
     min_minutes = MIN_MINUTES.get(timeframe, 60)
 
-    if symbol.upper().endswith('USD') and not symbol.upper().endswith('USDT'):
-        db_symbol = symbol[:-3].upper() + 'USDT'
+    # Special mapping: XAUUSD uses PAXG (Paxos Gold) on Binance
+    ASSET_BINANCE_MAP = {'XAUUSD': 'PAXGUSDT'}
+    sym_upper = symbol.upper()
+    if sym_upper in ASSET_BINANCE_MAP:
+        db_symbol = ASSET_BINANCE_MAP[sym_upper]
+    elif sym_upper.endswith('USD') and not sym_upper.endswith('USDT'):
+        db_symbol = sym_upper[:-3] + 'USDT'
     else:
-        db_symbol = symbol.upper()
+        db_symbol = sym_upper
 
     try:
-        # Fetch all records from last 35 days, oldest first
-        since = tz.now() - datetime.timedelta(days=35)
+        # Fetch all records from last 5 months (matches history page window)
+        since = tz.now() - datetime.timedelta(days=150)
         records = ReversalZone.objects.filter(
             symbol=db_symbol,
             timeframe=timeframe,

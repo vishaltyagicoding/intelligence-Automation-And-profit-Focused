@@ -230,18 +230,16 @@ export default function ChartComponent({
     setSigLoading(true); // Show loading immediately to hide label repositioning
     chartStartTimeRef.current = 0; // Reset until new candles load
 
-    // Restore or create marker map for this asset+timeframe
+    // On asset/timeframe switch: always start with a clean marker slate.
+    // This prevents labels from jumping between candles when switching assets.
     const cacheKey = `${asset}:${timeframe}`;
-    if (!markerCacheRef.current.has(cacheKey)) {
-      markerCacheRef.current.set(cacheKey, new Map());
-    }
+    // Create fresh map for this key — never show stale markers from previous load
+    markerCacheRef.current.set(cacheKey, new Map());
     markersRef.current = markerCacheRef.current.get(cacheKey)!;
 
-    // Clear chart data immediately to prevent old asset's data from showing
+    // Clear chart data and markers immediately
     seriesRef.current?.setData([]);
-    seriesRef.current?.setMarkers([]); // Clear markers immediately to prevent jumping
-    // Do NOT clear markers here — we restore from markerCacheRef immediately above
-    // and flushMarkers() will re-apply them after new candle data loads
+    seriesRef.current?.setMarkers([]);
 
     // candle map: candleStartTime(seconds) → CandleDataPoint
     const candles: Map<number, CandleDataPoint> = new Map();
@@ -588,7 +586,7 @@ export default function ChartComponent({
         };
         const limit = TF_LIMIT[timeframe] ?? 1000;
         const res   = await fetch(
-          `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${TF_BINANCE[timeframe]}&limit=${limit}`
+          `https://api.binance.us/api/v3/klines?symbol=${sym}&interval=${TF_BINANCE[timeframe]}&limit=${limit}`
         );
         const raw = await res.json();
         if (gone.current) return;

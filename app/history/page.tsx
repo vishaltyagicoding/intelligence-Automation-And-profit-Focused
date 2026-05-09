@@ -4,7 +4,7 @@
 export const dynamic = 'force-dynamic';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -20,111 +20,138 @@ interface SignalHistory {
   timeframe: string;
 }
 
+// ALL symbols and ALL timeframes — same as what reversal calculator uses
+const SYMBOLS = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'] as const;
+const TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d'] as const;
+
 export default function SignalHistoryPage() {
   const router = useRouter();
   const { isAuthenticated, loading, user } = useAuth();
 
-  const [signals, setSignals] = useState<SignalHistory[]>([]);
+  const [signals, setSignals]           = useState<SignalHistory[]>([]);
   const [loadingSignals, setLoadingSignals] = useState(true);
-  const [filter, setFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
+  const [lastUpdated, setLastUpdated]   = useState<Date | null>(null);
+  const [filter, setFilter]             = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   const [symbolFilter, setSymbolFilter] = useState<'ALL' | 'BTCUSD' | 'ETHUSD' | 'XAUUSD' | 'LTCUSD'>('ALL');
 
-  // Protect route - redirect to login if not authenticated
+  // Protect route
   useEffect(() => {
-    if (!loading && !isAuthenticated) {
-      router.push('/login');
-    }
+    if (!loading && !isAuthenticated) router.push('/login');
   }, [isAuthenticated, loading, router]);
 
-  // Check subscription status - redirect to subscription if expired
   useEffect(() => {
     if (!loading && isAuthenticated && user) {
-      const subscriptionStatus = user.subscription_status;
-      
-      // If subscription exists and is not active, redirect to subscription page
-      if (subscriptionStatus && !subscriptionStatus.is_active && user.manual_subscription !== 'activated') {
+      const sub = user.subscription_status;
+      if (sub && !sub.is_active && user.manual_subscription !== 'activated') {
         router.push('/subscription');
       }
     }
   }, [isAuthenticated, loading, user, router]);
 
-  // Fetch signals only when authenticated
-  useEffect(() => {
-    if (!loading && isAuthenticated) {
-      fetchSignalHistory();
-    }
-  }, [isAuthenticated, loading]);
+  // ── Core fetch — ALL symbols × ALL timeframes in PARALLEL ──────────────────
+  const fetchSignalHistory = useCallback(async () => {
+    if (!isAuthenticated) return;
+    setLoadingSignals(true);
 
-  const fetchSignalHistory = async () => {
     try {
-      const symbols = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'];
-      const timeframes = ['1h', '4h', '1d'];
-      const allSignals: SignalHistory[] = [];
-      const apiBaseUrl = '/api';
-
-      for (const symbol of symbols) {
-        for (const timeframe of timeframes) {
-          try {
-            const url = `${apiBaseUrl}/trading/signal-history/${symbol}/?timeframe=${timeframe}`;
-            const response = await fetch(url, {
+      // Build all fetch promises at once — parallel, not sequential
+      const tasks = SYMBOLS.flatMap(symbol =>
+        TIMEFRAMES.map(timeframe => ({
+          symbol,
+          timeframe,
+          promise: fetch(
+            `/api/trading/signal-history/${symbol}/?timeframe=${timeframe}`,
+            {
               headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(5000),
-            });
-
-            if (response.ok) {
-              const data = await response.json();
-              if (data.success && data.signals && data.signals.length > 0) {
-                const convertedSignals = data.signals.map((signal: any, index: number) => ({
-                  id: `${symbol}-${timeframe}-${index}-${signal.timestamp}`,
-                  timestamp: signal.timestamp,
-                  symbol: symbol,
-                  action: signal.is_bullish ? 'BUY' as const : 'SELL' as const,
-                  entryPrice: signal.center_price,
-                  stopLoss: signal.is_bullish ? signal.outer_bottom : signal.outer_top,
-                  target: signal.is_bullish ? signal.outer_top : signal.outer_bottom,
-                  status: 'OPEN' as const,
-                  timeframe: timeframe,
-                }));
-                allSignals.push(...convertedSignals);
-              }
+              signal: AbortSignal.timeout(8000),
             }
-          } catch (err) {
-            continue;
-          }
-        }
-      }
-
-      allSignals.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-      const fiveMonthsAgo = new Date();
-      fiveMonthsAgo.setMonth(fiveMonthsAgo.getMonth() - 5);
-      const filteredSignals = allSignals.filter(
-        signal => new Date(signal.timestamp) >= fiveMonthsAgo
+          )
+            .then(r => r.ok ? r.json() : null)
+            .catch(() => null),
+        }))
       );
 
-      setSignals(filteredSignals);
+      // Execute ALL requests in parallel — 28 calls in ~1-2s instead of 18s
+      const results = await Promise.all(tasks.map(t => t.promise));
+
+      const allSignals: SignalHistory[] = [];
+
+      results.forEach((data, i) => {
+        const { symbol, timeframe } = tasks[i];
+        if (!data?.success || !data.signals?.length) return;
+
+        const converted = data.signals.map((signal: Record<string, unknown>, idx: number) => ({
+          id:         `${symbol}-${timeframe}-${idx}-${signal.timestamp}`,
+          timestamp:  signal.timestamp as string,
+          symbol,
+          action:     (signal.is_bullish ? 'BUY' : 'SELL') as 'BUY' | 'SELL',
+          entryPrice: signal.center_price as number,
+          stopLoss:   signal.is_bullish ? (signal.outer_bottom as number) : (signal.outer_top as number),
+          target:     signal.is_bullish ? (signal.outer_top as number)    : (signal.outer_bottom as number),
+          status:     'OPEN' as const,
+          timeframe,
+        }));
+
+        allSignals.push(...converted);
+      });
+
+      // Sort newest first
+      allSignals.sort((a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+
+      // Keep last 5 months
+      const fiveMonthsAgo = new Date();
+      fiveMonthsAgo.setMonth(fiveMonthsAgo.getMonth() - 5);
+      const finalSignals = allSignals.filter(
+        s => new Date(s.timestamp) >= fiveMonthsAgo
+      );
+
+      setSignals(finalSignals);
+      setLastUpdated(new Date());
     } catch (error) {
       console.error('Error fetching signal history:', error);
     } finally {
       setLoadingSignals(false);
     }
-  };
+  }, [isAuthenticated]);
 
-  // Calculate stats
+  // Initial fetch when auth is ready
+  useEffect(() => {
+    if (!loading && isAuthenticated) {
+      fetchSignalHistory();
+    }
+  }, [isAuthenticated, loading, fetchSignalHistory]);
+
+  // Auto-refresh every 60 seconds — picks up new signals automatically
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(fetchSignalHistory, 60_000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, fetchSignalHistory]);
+
+  // Refresh when tab gets focus (user coming back to page)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const onFocus = () => fetchSignalHistory();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [isAuthenticated, fetchSignalHistory]);
+
+  // Stats
   const stats = {
     total: signals.length,
-    buy: signals.filter(s => s.action === 'BUY').length,
-    sell: signals.filter(s => s.action === 'SELL').length,
+    buy:   signals.filter(s => s.action === 'BUY').length,
+    sell:  signals.filter(s => s.action === 'SELL').length,
   };
 
-  // Filter signals
-  const filteredSignals = signals.filter(signal => {
-    if (filter !== 'ALL' && signal.action !== filter) return false;
-    if (symbolFilter !== 'ALL' && signal.symbol !== symbolFilter) return false;
+  // Filter
+  const filteredSignals = signals.filter(s => {
+    if (filter !== 'ALL' && s.action !== filter) return false;
+    if (symbolFilter !== 'ALL' && s.symbol !== symbolFilter) return false;
     return true;
   });
 
-  // Show loading while checking authentication
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0a0e1a] flex items-center justify-center">
@@ -136,10 +163,7 @@ export default function SignalHistoryPage() {
     );
   }
 
-  // Don't render if not authenticated (redirect is already triggered)
-  if (!isAuthenticated) {
-    return null;
-  }
+  if (!isAuthenticated) return null;
 
   return (
     <div className="min-h-screen bg-[#0a0e1a]">
@@ -154,6 +178,13 @@ export default function SignalHistoryPage() {
               <span className="text-xl font-bold text-white">SmartRisk</span>
             </Link>
             <div className="flex items-center gap-4">
+              <button
+                onClick={fetchSignalHistory}
+                disabled={loadingSignals}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50 transition"
+              >
+                {loadingSignals ? 'Refreshing…' : '↻ Refresh'}
+              </button>
               <Link href="/dashboard" className="text-sm font-medium text-slate-400 hover:text-white transition">
                 ← Back to Dashboard
               </Link>
@@ -165,20 +196,40 @@ export default function SignalHistoryPage() {
       {/* Header */}
       <div className="border-b border-slate-800/50 bg-[#0f1419]">
         <div className="mx-auto max-w-7xl px-6 py-8">
-          <h1 className="mb-2 text-3xl font-bold text-white">SmartRisk Signal History</h1>
-          <p className="text-slate-400">
-            Complete history of all SmartRisk-generated trading signals from the last 5 months
-          </p>
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="mb-2 text-3xl font-bold text-white">SmartRisk Signal History</h1>
+              <p className="text-slate-400">
+                Complete history of all SmartRisk-generated trading signals from the last 5 months
+              </p>
+            </div>
+            {lastUpdated && (
+              <p className="text-xs text-slate-500 mt-1">
+                Updated {lastUpdated.toLocaleTimeString()} UTC
+              </p>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Stats Section */}
+      {/* Stats */}
       <div className="border-b border-slate-800/50 bg-[#0f1419]">
         <div className="mx-auto max-w-7xl px-6 py-6">
-          <div className="flex justify-center">
-            <div className="rounded-xl border border-slate-800/50 bg-[#0a0e1a] p-6 text-center min-w-[200px]">
-              <div className="mb-1 text-4xl font-bold text-white">{stats.total}</div>
+          <div className="flex justify-center gap-6">
+            <div className="rounded-xl border border-slate-800/50 bg-[#0a0e1a] p-6 text-center min-w-[140px]">
+              {loadingSignals
+                ? <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent mb-1" />
+                : <div className="mb-1 text-4xl font-bold text-white">{stats.total}</div>
+              }
               <div className="text-sm text-slate-500">TOTAL SIGNALS</div>
+            </div>
+            <div className="rounded-xl border border-slate-800/50 bg-[#0a0e1a] p-6 text-center min-w-[140px]">
+              <div className="mb-1 text-4xl font-bold text-emerald-400">{stats.buy}</div>
+              <div className="text-sm text-slate-500">BUY SIGNALS</div>
+            </div>
+            <div className="rounded-xl border border-slate-800/50 bg-[#0a0e1a] p-6 text-center min-w-[140px]">
+              <div className="mb-1 text-4xl font-bold text-rose-400">{stats.sell}</div>
+              <div className="text-sm text-slate-500">SELL SIGNALS</div>
             </div>
           </div>
         </div>
@@ -190,7 +241,7 @@ export default function SignalHistoryPage() {
           <div>
             <label className="mb-2 block text-xs font-medium text-slate-400">FILTER BY ACTION</label>
             <div className="flex gap-2">
-              {(['ALL', 'BUY', 'SELL'] as const).map((action) => (
+              {(['ALL', 'BUY', 'SELL'] as const).map(action => (
                 <button
                   key={action}
                   onClick={() => setFilter(action)}
@@ -208,8 +259,8 @@ export default function SignalHistoryPage() {
 
           <div>
             <label className="mb-2 block text-xs font-medium text-slate-400">FILTER BY SYMBOL</label>
-            <div className="flex gap-2">
-              {(['ALL', 'BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'] as const).map((sym) => (
+            <div className="flex gap-2 flex-wrap">
+              {(['ALL', 'BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'] as const).map(sym => (
                 <button
                   key={sym}
                   onClick={() => setSymbolFilter(sym)}
@@ -226,13 +277,13 @@ export default function SignalHistoryPage() {
           </div>
         </div>
 
-        {/* Signal Table */}
+        {/* Table */}
         <div className="rounded-xl border border-slate-800/50 bg-[#0f1419] overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="border-b border-slate-800/50 bg-slate-950/50">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Date & Time</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Date & Time (UTC)</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Symbol</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Timeframe</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Action</th>
@@ -243,10 +294,13 @@ export default function SignalHistoryPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
-                {loadingSignals ? (
+                {loadingSignals && signals.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-slate-400">
-                      Loading signal history from last 5 months...
+                    <td colSpan={8} className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent"></div>
+                        <p className="text-slate-400">Loading signals from all timeframes in parallel…</p>
+                      </div>
                     </td>
                   </tr>
                 ) : filteredSignals.length === 0 ? (
@@ -256,10 +310,11 @@ export default function SignalHistoryPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredSignals.map((signal) => (
+                  filteredSignals.map(signal => (
                     <tr key={signal.id} className="hover:bg-slate-800/30 transition">
                       <td className="px-6 py-4 text-sm text-slate-300">
-                        {new Date(signal.timestamp).toLocaleString()}
+                        {/* Show UTC time — consistent with chart display */}
+                        {new Date(signal.timestamp).toISOString().replace('T', ' ').slice(0, 19)} UTC
                       </td>
                       <td className="px-6 py-4">
                         <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-white">
@@ -284,10 +339,10 @@ export default function SignalHistoryPage() {
                         ${signal.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="px-6 py-4 text-right text-sm text-rose-400">
-                        {signal.stopLoss ? signal.stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                        {signal.stopLoss ? `$${signal.stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                       </td>
                       <td className="px-6 py-4 text-right text-sm text-emerald-400">
-                        {signal.target ? signal.target.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                        {signal.target ? `$${signal.target.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                       </td>
                       <td className="px-6 py-4 text-center">
                         <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-400">
@@ -302,17 +357,18 @@ export default function SignalHistoryPage() {
           </div>
         </div>
 
-        {/* Info Section */}
+        {/* Info */}
         <div className="mt-8 rounded-xl border border-slate-800/50 bg-[#0f1419] p-6">
           <h3 className="mb-4 text-lg font-bold text-white">Understanding Signal History</h3>
           <div className="space-y-3 text-sm text-slate-400">
             <p><strong className="text-white">Entry Price:</strong> The price at which the SmartRisk reversal signal was generated</p>
-            <p><strong className="text-white">Stop Loss:</strong> Recommended stop loss level to limit downside risk (outer zone boundary)</p>
+            <p><strong className="text-white">Stop Loss:</strong> Recommended stop loss level (outer zone boundary)</p>
             <p><strong className="text-white">Target:</strong> Recommended take profit level (outer zone boundary)</p>
-            <p><strong className="text-white">Timeframe:</strong> The chart timeframe on which the signal was detected (1h, 4h, 1d)</p>
-            <p><strong className="text-white">Status:</strong> All signals shown are OPEN (historical signals for reference)</p>
+            <p><strong className="text-white">Timeframe:</strong> The chart timeframe on which the signal was detected</p>
+            <p><strong className="text-white">Status:</strong> OPEN — historical signals shown for reference</p>
             <p className="mt-4 rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 text-cyan-300">
-              <strong>Note:</strong> This history shows reversal signals from the last 5 months across all 4 cryptocurrencies on major timeframes (1h, 4h, 1d).
+              <strong>Note:</strong> History shows reversal signals from the last 5 months across all 4 assets
+              and all timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d). Automatically refreshes every 60 seconds.
             </p>
           </div>
         </div>

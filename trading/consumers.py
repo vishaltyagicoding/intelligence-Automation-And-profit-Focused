@@ -151,90 +151,77 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({"error": str(exc)}))
 
     async def start_binance_stream(self):
-        """Start Binance kline (candlestick) socket for the selected timeframe with retry logic."""
+        """Start Binance.US kline stream using raw aiohttp WebSocket.
+        python-binance does not support Binance.US domain on AWS — we use raw WS URL directly.
+        """
         retry_count = 0
         max_retries = 5
-        
+
         while retry_count < max_retries:
             try:
-                if not self.binance_client:
-                    # Use Binance.US API endpoint
-                    self.binance_client = await AsyncClient.create(
-                        api_key=settings.BINANCE_API_KEY or None,
-                        api_secret=settings.BINANCE_API_SECRET or None,
-                        tld='us'  # Use Binance.US
-                    )
-                
-                self.bsm = BinanceSocketManager(self.binance_client)
                 self.stream_task = asyncio.create_task(self.stream_binance_data())
-                logger.info("Binance.US stream started successfully for %s at %s", self.asset, self.timeframe)
+                logger.info("Binance.US raw WS stream started for %s at %s", self.asset, self.timeframe)
                 return
             except Exception as exc:
                 retry_count += 1
-                logger.error("Error starting Binance stream for %s (attempt %d/%d): %s", 
-                           self.asset, retry_count, max_retries, exc)
-                await asyncio.sleep(2 ** retry_count)  # Exponential backoff
-        
+                logger.error("Error starting Binance stream for %s (attempt %d/%d): %s",
+                             self.asset, retry_count, max_retries, exc)
+                await asyncio.sleep(2 ** retry_count)
+
         logger.error("Failed to start Binance stream for %s after %d attempts", self.asset, max_retries)
 
     async def stream_binance_data(self):
-        """Stream kline data for the selected timeframe with REST API fallback for stale data."""
-        last_price_update = {}  # Track last unique price per asset
-        stale_count = 0
-        max_stale = 3  # Switch to REST API after 3 stale updates
-        
-        try:
-            # Use kline stream for the selected interval
-            async with self.bsm.kline_socket(self.binance_symbol, interval=self.binance_interval) as stream:
-                logger.info("Kline stream opened for %s at %s (Binance: %s)", 
-                           self.asset, self.timeframe, self.binance_interval)
-                last_message_time = time.time()
-                
-                # For 10m aggregation: buffer to combine two 5m candles
-                candle_buffer_10m = None
-                
-                while True:
-                    try:
-                        # Wait for message with 30 second timeout (check more frequently)
-                        message = await asyncio.wait_for(stream.recv(), timeout=30.0)
-                        last_message_time = time.time()
-                        
-                        # Check if price is stale (same as last update)
-                        kline = message.get('k', {})
-                        current_price = float(kline.get('c', 0))
-                        
-                        if self.asset in last_price_update and last_price_update[self.asset] == current_price:
-                            stale_count += 1
-                            if stale_count >= max_stale:
-                                logger.warning("Stale WebSocket data for %s, fetching fresh price via REST API", self.asset)
-                                await self.fetch_and_broadcast_rest_price()
-                                stale_count = 0
-                                continue
-                        else:
-                            last_price_update[self.asset] = current_price
-                            stale_count = 0
-                        
-                        # Handle 10m aggregation (combine two 5m candles)
-                        if self.timeframe == "10m":
-                            await self.process_kline_10m(message, candle_buffer_10m)
-                        else:
-                            await self.process_kline(message)
-                    except asyncio.TimeoutError:
-                        # Fetch fresh price via REST API on timeout
-                        logger.warning("WebSocket timeout for %s, fetching via REST API", self.asset)
-                        await self.fetch_and_broadcast_rest_price()
-                        last_message_time = time.time()
-                        continue
-                        
-        except asyncio.CancelledError:
-            logger.info("Binance stream cancelled for %s", self.asset)
-            raise
-        except Exception as exc:
-            logger.error("Error in Binance stream for %s: %s", self.asset, exc)
-            # Try to restart the stream
-            await asyncio.sleep(5)
-            if self.asset:  # Only restart if still connected
-                await self.start_binance_stream()
+        """
+        Stream kline data using raw aiohttp WebSocket to Binance.US.
+        Connects directly to wss://stream.binance.us:9443/ws/{symbol}@kline_{interval}
+        This bypasses python-binance which does NOT support the .us TLD.
+        Auto-reconnects on disconnect with exponential backoff.
+        """
+        import aiohttp
+        import json as _json
+
+        symbol    = self.binance_symbol.lower()
+        interval  = self.binance_interval
+        ws_url    = f"wss://stream.binance.us:9443/ws/{symbol}@kline_{interval}"
+        backoff   = 1
+
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(
+                        ws_url,
+                        heartbeat=20,
+                        receive_timeout=30,
+                        ssl=True,
+                    ) as ws:
+                        logger.info("Binance.US raw WS connected: %s @kline_%s", symbol, interval)
+                        backoff = 1  # reset on success
+
+                        async for msg in ws:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                try:
+                                    data = _json.loads(msg.data)
+                                    # Binance stream wraps kline under key 'k'
+                                    if 'k' not in data:
+                                        continue
+                                    await self.process_kline(data)
+                                except Exception as exc:
+                                    logger.error("Error processing WS message for %s: %s", self.asset, exc)
+
+                            elif msg.type in (aiohttp.WSMsgType.CLOSED,
+                                             aiohttp.WSMsgType.ERROR):
+                                logger.warning("WS closed/error for %s: %s", self.asset, msg)
+                                break
+
+            except asyncio.CancelledError:
+                logger.info("Binance.US stream cancelled for %s", self.asset)
+                raise
+            except Exception as exc:
+                logger.error("Binance.US WS error for %s: %s — retrying in %ds", self.asset, exc, backoff)
+                await self.fetch_and_broadcast_rest_price()
+
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60)  # cap at 60s
 
     async def fetch_and_broadcast_rest_price(self):
         """Fetch current price via REST API and broadcast to clients."""

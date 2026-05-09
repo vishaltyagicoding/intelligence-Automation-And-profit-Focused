@@ -24,7 +24,7 @@ export default function SubscriptionPage() {
     const updateCountdown = () => {
       if (!user?.subscription_status?.trial_end) return;
       
-      const trialEnd = new Date(user.subscription_status.trial_end);
+      const trialEnd = new Date(user.subscription_status!.trial_end!);
       const now = new Date();
       const diff = trialEnd.getTime() - now.getTime();
 

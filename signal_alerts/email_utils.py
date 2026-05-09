@@ -46,32 +46,16 @@ def send_signal_alert_email(email, username, signal_data):
         target = signal_data.get('target', 'N/A')
         timestamp = signal_data.get('timestamp', 'N/A')
         
-        # Calculate Stop Loss
-        # BUY: Stop Loss = Entry - 50% of distance between Entry and Target
-        # SELL: Stop Loss = Entry + 50% of distance between Entry and Target
-        stop_loss = 'N/A'
-        if entry_price != 'N/A' and target != 'N/A':
+        # Use stop_loss from signal_data if provided (from outer zone boundary)
+        # This is more accurate than calculating from entry/target
+        raw_stop_loss = signal_data.get('stop_loss')
+        if raw_stop_loss and raw_stop_loss not in ('N/A', '', None, 0):
             try:
-                entry_float = float(entry_price)
-                target_float = float(target)
-                
-                if signal_type == 'BUY':
-                    # For BUY: Calculate distance and go 50% down from entry
-                    # Distance = Target - Entry
-                    # Stop Loss = Entry - (Distance * 0.5)
-                    calculate_distance = target_float - entry_float
-                    stop_loss_value = entry_float - (calculate_distance * 0.5)
-                    stop_loss = f"{stop_loss_value:.2f}"
-                elif signal_type == 'SELL':
-                    # For SELL: Calculate distance and go 50% up from entry
-                    # Distance = Entry - Target
-                    # Stop Loss = Entry + (Distance * 0.5)
-                    calculate_distance = entry_float - target_float
-                    stop_loss_value = entry_float + (calculate_distance * 0.5)
-                    stop_loss = f"{stop_loss_value:.2f}"
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Could not calculate stop loss: {e}")
+                stop_loss = f"{float(raw_stop_loss):.2f}"
+            except (ValueError, TypeError):
                 stop_loss = 'N/A'
+        else:
+            stop_loss = 'N/A'
         
         # Determine signal color and emoji
         if signal_type == 'BUY':
@@ -331,7 +315,15 @@ def notify_signal_subscribers(signal_data):
         logger.warning("Signal data missing crypto or timeframe")
         return 0
     
-    # Find all active alerts matching this signal
+    # Normalise crypto to user-facing format (BTCUSD not BTCUSDT)
+    # This matches what's stored in SignalAlert.crypto
+    BINANCE_TO_USER = {
+        'BTCUSDT': 'BTCUSD', 'ETHUSDT': 'ETHUSD',
+        'LTCUSDT': 'LTCUSD', 'PAXGUSDT': 'XAUUSD', 'XAUUSDT': 'XAUUSD',
+    }
+    crypto = BINANCE_TO_USER.get(crypto.upper(), crypto.upper())
+
+    # Find all active alerts matching this signal (paid subscribers only)
     alerts = SignalAlert.objects.filter(
         crypto=crypto,
         timeframe=timeframe,

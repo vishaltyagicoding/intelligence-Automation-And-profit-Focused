@@ -1070,13 +1070,13 @@ def create_and_serialize_signal(
             ts_str = str(signal_candle_time)
         
         signal_data = {
-            'crypto': asset,
-            'timeframe': ai_context.get('timeframe', 'N/A') if ai_context else 'N/A',
-            'signal_type': action,
-            'entry_price': float(price) if price else 0,
-            'stop_loss': float(stop_loss) if stop_loss else 0,
-            'target': float(target) if target else 0,
-            'timestamp': ts_str,
+            'crypto':       asset,   # Already in user format: BTCUSD, ETHUSD, XAUUSD, LTCUSD
+            'timeframe':    (ai_context.get('timeframe') if ai_context else None) or self.timeframe,
+            'signal_type':  action,
+            'entry_price':  float(price) if price else 0,
+            'stop_loss':    float(stop_loss) if stop_loss else 0,
+            'target':       float(target) if target else 0,
+            'timestamp':    ts_str,
         }
         
         # Send notifications asynchronously (non-blocking)

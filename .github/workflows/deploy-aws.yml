@@ -37,17 +37,34 @@ jobs:
       - name: 📦 Deploy code to EC2
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            # Create project directory if not exists
             mkdir -p ~/smartrisk
             cd ~/smartrisk
-            mkdir -p nginx/certbot nginx/ssl
+
+            # Create nginx directories
+            mkdir -p nginx/certbot
+            mkdir -p nginx/ssl
+
+            # Backup .env files
             if [ -f .env ]; then cp .env /tmp/.env.backup; fi
             if [ -f .env.production ]; then cp .env.production /tmp/.env.production.backup; fi
-            sudo rm -rf ~/smartrisk/* ~/smartrisk/.[!.]*
+
+            # Remove all files (keep .env backup safe)
+            sudo rm -rf ~/smartrisk/*
+            sudo rm -rf ~/smartrisk/.[!.]*
+
+            # Restore .env files
             if [ -f /tmp/.env.backup ]; then mv /tmp/.env.backup ~/smartrisk/.env; fi
             if [ -f /tmp/.env.production.backup ]; then mv /tmp/.env.production.backup ~/smartrisk/.env.production; fi
-            mkdir -p nginx/certbot nginx/ssl
+
+            # Recreate nginx directories
+            mkdir -p nginx/certbot
+            mkdir -p nginx/ssl
+
             echo "✅ Ready for new code"
           EOF
+
+          # Copy all files except .env
           rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' --exclude '.env' \
             -e "ssh -o StrictHostKeyChecking=no" \
             ./ ubuntu@${{ secrets.EC2_HOST }}:~/smartrisk/
@@ -98,38 +115,43 @@ jobs:
             sudo docker-compose build django celery_worker celery_beat frontend
           EOF
 
-      - name: 🔐 Obtain SSL certificate (using staging to avoid rate limits)
+      - name: 🔐 Obtain SSL certificate (standalone mode)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Use staging environment to bypass rate limits (--test-cert)
-            # Remove production certs if they exist
-            sudo rm -rf ./nginx/ssl/live/smartriskfx.com
-            sudo rm -rf ./nginx/ssl/archive/smartriskfx.com
-
-            echo "🔐 Obtaining TEST certificate from Let's Encrypt staging..."
-            sudo fuser -k 80/tcp || true
-
-            sudo docker run --rm \
-              -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-              -p 80:80 \
-              certbot/certbot certonly --standalone \
-              -d smartriskfx.com \
-              -d www.smartriskfx.com \
-              --email ${{ secrets.CERTBOT_EMAIL }} \
-              --agree-tos \
-              --no-eff-email \
-              --non-interactive \
-              --test-cert
-
-            if [ $? -eq 0 ]; then
-              echo "✅ Staging SSL certificate obtained! (This is fine for testing.)"
-              sudo chmod -R 755 ./nginx/ssl
-              echo "✅ SSL directory permissions set."
+            # Check if certificate already exists
+            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
+              echo "✅ SSL certificate exists. Checking renewal..."
+              sudo docker run --rm \
+                -v $(pwd)/nginx/ssl:/etc/letsencrypt \
+                certbot/certbot renew --dry-run
             else
-              echo "❌ SSL certificate failed. Check DNS and port 80."
-              exit 1
+              echo "🔐 Obtaining new SSL certificate for smartriskfx.com..."
+
+              # Free port 80 if anything is using it
+              sudo fuser -k 80/tcp || true
+
+              # Run certbot standalone
+              sudo docker run --rm \
+                -v $(pwd)/nginx/ssl:/etc/letsencrypt \
+                -p 80:80 \
+                certbot/certbot certonly --standalone \
+                -d smartriskfx.com \
+                -d www.smartriskfx.com \
+                --email ${{ secrets.CERTBOT_EMAIL }} \
+                --agree-tos \
+                --no-eff-email \
+                --non-interactive
+                --test-cert
+
+              if [ $? -eq 0 ]; then
+                echo "✅ SSL certificate obtained!"
+                sudo chmod -R 755 ./nginx/ssl
+              else
+                echo "❌ SSL certificate failed. Check DNS and port 80."
+                exit 1
+              fi
             fi
           EOF
 
@@ -137,7 +159,6 @@ jobs:
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
-            # Ensure nginx can read the staging certs (fix permissions)
             sudo docker-compose up -d
             sleep 10
             sudo docker-compose ps
@@ -220,11 +241,11 @@ jobs:
             sudo docker-compose restart celery_beat celery_worker
           EOF
 
-      - name: 🔐 Setup SSL auto-renewal (cron job – will use staging for now)
+      - name: 🔐 Setup SSL auto-renewal (cron job)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true' --post-hook 'cd ~/smartrisk && sudo docker-compose exec -T nginx nginx -s reload' --quiet --test-cert") | crontab -
-            echo "✅ SSL auto-renewal installed (staging environment)"
+            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true' --post-hook 'cd ~/smartrisk && sudo docker-compose exec -T nginx nginx -s reload' --quiet") | crontab -
+            echo "✅ SSL auto-renewal installed (twice daily)"
           EOF
 
       - name: 📊 Deployment Summary
@@ -233,8 +254,7 @@ jobs:
           echo "✅ DEPLOYMENT SUCCESSFUL!"
           echo "=========================================================================="
           echo "🌐 https://smartriskfx.com"
-          echo "🔒 SSL is active (staging certificate – no browser trust)"
-          echo "⚠️ To get a production certificate, wait for Let's Encrypt rate limit to expire, then remove '--test-cert' flag."
+          echo "🔒 SSL is active and will auto-renew"
           echo "=========================================================================="
 
   notify-failure:

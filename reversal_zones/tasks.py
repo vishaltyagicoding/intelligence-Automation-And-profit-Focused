@@ -245,39 +245,74 @@ def _filter_new_only(zones: list, last_db: dict | None) -> list:
     return new
 
 
+# Binance internal symbol → user-facing symbol (matches SignalAlert.crypto in DB)
+_BINANCE_TO_USER_SYMBOL = {
+    'BTCUSDT':  'BTCUSD',
+    'ETHUSDT':  'ETHUSD',
+    'LTCUSDT':  'LTCUSD',
+    'PAXGUSDT': 'XAUUSD',   # Gold: stored as XAUUSD in user alerts
+    'XAUUSDT':  'XAUUSD',
+}
+
+
 def _send_signal_notifications(symbol: str, timeframe: str, new_signals: list):
     """
     Send email notifications to paid subscribers for new signals.
-    Only sends to users with manual_subscription='activated' (no trial/free users).
+    Converts internal Binance symbol (BTCUSDT) to user-facing symbol (BTCUSD)
+    so it matches SignalAlert.crypto values stored in the database.
+    Only sends to users with manual_subscription='activated'.
     """
     try:
         from signal_alerts.email_utils import notify_signal_subscribers
-        from django.utils import timezone
-        
+        import pytz
+
+        # Convert Binance format (BTCUSDT) → user-facing format (BTCUSD)
+        # This is the ROOT CAUSE fix — mismatched symbols caused 0 emails sent
+        user_symbol = _BINANCE_TO_USER_SYMBOL.get(symbol.upper(), symbol)
+
         for signal_info in new_signals:
             zone = signal_info['zone']
-            data = signal_info['data']
-            
-            # Prepare signal data for email
+
+            is_bull    = zone.is_bullish
+            entry      = float(zone.center_price)
+            core_top   = float(zone.core_top)
+            core_bot   = float(zone.core_bottom)
+
+            # Calculate target and stop loss using user's formula
+            if is_bull:  # BUY signal
+                target = core_top
+                # For BUY: calculate = target - entry, stoploss = entry - (calculate * 0.5)
+                calculate = target - entry
+                stop_loss = entry - (calculate * 0.5)
+            else:  # SELL signal
+                target = core_bot
+                # For SELL: calculate = entry - target, stoploss = target + (calculate * 0.5)
+                calculate = entry - target
+                stop_loss = target + (calculate * 0.5)
+
+            ts_str = zone.reversal_time.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+
             signal_data = {
-                'crypto': symbol,
-                'timeframe': timeframe,
-                'signal_type': 'BUY' if zone.is_bullish else 'SELL',
-                'entry_price': float(zone.center_price),
-                'target': float(zone.core_top if zone.is_bullish else zone.core_bottom),
-                # Use actual signal candle reversal_time (UTC) — NOT current time
-            # zone.reversal_time is the candle timestamp from Binance (UTC)
-            'timestamp': zone.reversal_time.astimezone(__import__('pytz').utc).strftime('%Y-%m-%d %H:%M:%S UTC'),
+                'crypto':       user_symbol,   # BTCUSD / ETHUSD / XAUUSD / LTCUSD
+                'timeframe':    timeframe,
+                'signal_type':  'BUY' if is_bull else 'SELL',
+                'entry_price':  entry,
+                'target':       target,
+                'stop_loss':    stop_loss,
+                'timestamp':    ts_str,
             }
-            
-            # Send notifications (only to paid subscribers with activated subscription)
+
             notifications_sent = notify_signal_subscribers(signal_data)
-            
+
             if notifications_sent > 0:
-                logger.info(f"📧 Sent {notifications_sent} email notifications for {symbol} {timeframe} {signal_data['signal_type']}")
-    
+                logger.info(
+                    "📧 %d email(s) sent — %s %s %s @ %.4f",
+                    notifications_sent, user_symbol, timeframe,
+                    signal_data['signal_type'], entry
+                )
+
     except Exception as e:
-        logger.error(f"Error sending signal notifications: {e}", exc_info=True)
+        logger.error("Error sending signal notifications: %s", e, exc_info=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

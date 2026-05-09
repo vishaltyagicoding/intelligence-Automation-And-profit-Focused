@@ -86,8 +86,8 @@ export default function SignalHistoryPage() {
           symbol,
           action:     (signal.is_bullish ? 'BUY' : 'SELL') as 'BUY' | 'SELL',
           entryPrice: signal.center_price as number,
-          stopLoss:   signal.is_bullish ? (signal.outer_bottom as number) : (signal.outer_top as number),
-          target:     signal.is_bullish ? (signal.outer_top as number)    : (signal.outer_bottom as number),
+          stopLoss:   signal.stop_loss as number,
+          target:     signal.target as number,
           status:     'OPEN' as const,
           timeframe,
         }));

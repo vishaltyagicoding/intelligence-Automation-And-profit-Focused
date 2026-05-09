@@ -350,14 +350,33 @@ def get_signal_history(request, symbol):
 
         signals = []
         for rec in filtered:
+            # Calculate stop loss and target using the correct formula
+            is_bull = rec.is_bullish
+            entry = float(rec.center_price)
+            core_top = float(rec.core_top)
+            core_bot = float(rec.core_bottom)
+
+            if is_bull:  # BUY signal
+                target = core_top
+                # For BUY: calculate = target - entry, stoploss = entry - (calculate * 0.5)
+                calculate = target - entry
+                stop_loss = entry - (calculate * 0.5)
+            else:  # SELL signal
+                target = core_bot
+                # For SELL: calculate = entry - target, stoploss = target + (calculate * 0.5)
+                calculate = entry - target
+                stop_loss = target + (calculate * 0.5)
+
             signals.append({
                 'bar_index':    rec.bar_index,
-                'is_bullish':   rec.is_bullish,
-                'center_price': float(rec.center_price),
+                'is_bullish':   is_bull,
+                'center_price': entry,
+                'stop_loss':    stop_loss,
+                'target':       target,
                 'outer_top':    float(rec.outer_top),
                 'outer_bottom': float(rec.outer_bottom),
-                'core_top':     float(rec.core_top),
-                'core_bottom':  float(rec.core_bottom),
+                'core_top':     core_top,
+                'core_bottom':  core_bot,
                 'label':        rec.label_text,
                 'timestamp':    rec.reversal_time.isoformat(),
             })

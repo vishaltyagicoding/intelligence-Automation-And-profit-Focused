@@ -37,34 +37,17 @@ jobs:
       - name: 📦 Deploy code to EC2
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            # Create project directory if not exists
             mkdir -p ~/smartrisk
             cd ~/smartrisk
-
-            # Create nginx directories
-            mkdir -p nginx/certbot
-            mkdir -p nginx/ssl
-
-            # Backup .env files
+            mkdir -p nginx/certbot nginx/ssl
             if [ -f .env ]; then cp .env /tmp/.env.backup; fi
             if [ -f .env.production ]; then cp .env.production /tmp/.env.production.backup; fi
-
-            # Remove all files (keep .env backup safe)
-            sudo rm -rf ~/smartrisk/*
-            sudo rm -rf ~/smartrisk/.[!.]*
-
-            # Restore .env files
+            sudo rm -rf ~/smartrisk/* ~/smartrisk/.[!.]*
             if [ -f /tmp/.env.backup ]; then mv /tmp/.env.backup ~/smartrisk/.env; fi
             if [ -f /tmp/.env.production.backup ]; then mv /tmp/.env.production.backup ~/smartrisk/.env.production; fi
-
-            # Recreate nginx directories
-            mkdir -p nginx/certbot
-            mkdir -p nginx/ssl
-
+            mkdir -p nginx/certbot nginx/ssl
             echo "✅ Ready for new code"
           EOF
-
-          # Copy all files except .env
           rsync -avz --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' --exclude '.env' \
             -e "ssh -o StrictHostKeyChecking=no" \
             ./ ubuntu@${{ secrets.EC2_HOST }}:~/smartrisk/
@@ -115,42 +98,40 @@ jobs:
             sudo docker-compose build django celery_worker celery_beat frontend
           EOF
 
-      - name: 🔐 Obtain SSL certificate (standalone mode)
+      - name: 🔐 Obtain SSL certificate (staging – no rate limits)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Check if certificate already exists
-            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
-              echo "✅ SSL certificate exists. Checking renewal..."
-              sudo docker run --rm \
-                -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-                certbot/certbot renew --dry-run
+            # Remove any old/corrupted certificate data
+            sudo rm -rf ./nginx/ssl/live/smartriskfx.com
+            sudo rm -rf ./nginx/ssl/archive/smartriskfx.com
+
+            echo "🔐 Obtaining TEST certificate from Let's Encrypt staging..."
+            sudo fuser -k 80/tcp || true
+
+            # CORRECT DOMAIN NAME (no typo)
+            sudo docker run --rm \
+              -v $(pwd)/nginx/ssl:/etc/letsencrypt \
+              -p 80:80 \
+              certbot/certbot certonly --standalone \
+              -d smartriskfx.com \
+              -d www.smartriskfx.com \
+              --email ${{ secrets.CERTBOT_EMAIL }} \
+              --agree-tos \
+              --no-eff-email \
+              --non-interactive \
+              --test-cert
+
+            if [ $? -eq 0 ]; then
+              echo "✅ Staging SSL certificate obtained!"
+              sudo chmod -R 755 ./nginx/ssl
             else
-              echo "🔐 Obtaining new SSL certificate for smartriskfx.com..."
-
-              # Free port 80 if anything is using it
-              sudo fuser -k 80/tcp || true
-
-              # Run certbot standalone
-              sudo docker run --rm \
-                -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-                -p 80:80 \
-                certbot/certbot certonly --standalone \
-                -d smartriskfx.com \
-                -d www.smartriskfx.com \
-                --email ${{ secrets.CERTBOT_EMAIL }} \
-                --agree-tos \
-                --no-eff-email \
-                --non-interactive
-
-              if [ $? -eq 0 ]; then
-                echo "✅ SSL certificate obtained!"
-                sudo chmod -R 755 ./nginx/ssl
-              else
-                echo "❌ SSL certificate failed. Check DNS and port 80."
-                exit 1
-              fi
+              echo "❌ SSL certificate failed. Check DNS resolution for smartriskfx.com and port 80."
+              # Diagnostic: show DNS resolution
+              echo "=== DNS lookup for smartriskfx.com ==="
+              dig smartriskfx.com +short || nslookup smartriskfx.com
+              exit 1
             fi
           EOF
 
@@ -240,11 +221,11 @@ jobs:
             sudo docker-compose restart celery_beat celery_worker
           EOF
 
-      - name: 🔐 Setup SSL auto-renewal (cron job)
+      - name: 🔐 Setup SSL auto-renewal (staging)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true' --post-hook 'cd ~/smartrisk && sudo docker-compose exec -T nginx nginx -s reload' --quiet") | crontab -
-            echo "✅ SSL auto-renewal installed (twice daily)"
+            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true' --post-hook 'cd ~/smartrisk && sudo docker-compose exec -T nginx nginx -s reload' --quiet --test-cert") | crontab -
+            echo "✅ SSL auto-renewal installed (staging environment)"
           EOF
 
       - name: 📊 Deployment Summary
@@ -253,7 +234,8 @@ jobs:
           echo "✅ DEPLOYMENT SUCCESSFUL!"
           echo "=========================================================================="
           echo "🌐 https://smartriskfx.com"
-          echo "🔒 SSL is active and will auto-renew"
+          echo "🔒 SSL is active (staging certificate – browser will show 'Not Secure')"
+          echo "⚠️ To get a production certificate, set '--test-cert' and '--staging' flags to false after rate limit expires."
           echo "=========================================================================="
 
   notify-failure:

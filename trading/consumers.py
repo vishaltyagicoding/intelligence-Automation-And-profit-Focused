@@ -597,6 +597,49 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             db_symbol = self.binance_symbol.upper()
             await self._save_signal_to_db(db_symbol, self.timeframe, last_zone)
 
+            # ── Send email alert to paid subscribers who match this asset+timeframe ─
+            # This is the LIVE signal path (WebSocket candle close).
+            # We run it in a thread pool to avoid blocking the async event loop.
+            try:
+                import pytz
+                from reversal_zones.tasks import _BINANCE_TO_USER_SYMBOL
+                from signal_alerts.email_utils import notify_signal_subscribers
+
+                user_sym   = _BINANCE_TO_USER_SYMBOL.get(db_symbol, self.asset)
+                is_bull    = last_zone.get('is_bullish', True)
+                entry      = float(last_zone.get('center_price', 0))
+                outer_top  = float(last_zone.get('outer_top',  entry))
+                outer_bot  = float(last_zone.get('outer_bottom', entry))
+                ts_obj     = last_zone.get('timestamp') or last_zone.get('reversal_time')
+                if hasattr(ts_obj, 'strftime'):
+                    ts_str = ts_obj.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+                else:
+                    ts_str = str(ts_obj)
+
+                email_payload = {
+                    'crypto':      user_sym,
+                    'timeframe':   self.timeframe,
+                    'signal_type': 'BUY' if is_bull else 'SELL',
+                    'entry_price': entry,
+                    'stop_loss':   outer_bot if is_bull else outer_top,
+                    'target':      outer_top if is_bull else outer_bot,
+                    'timestamp':   ts_str,
+                }
+
+                # Run synchronous email code in executor to avoid blocking
+                import asyncio
+                loop = asyncio.get_event_loop()
+                sent = await loop.run_in_executor(
+                    None,
+                    lambda: notify_signal_subscribers(email_payload)
+                )
+                if sent:
+                    logger.info("📧 Live signal email: %d sent for %s %s %s",
+                                sent, user_sym, self.timeframe,
+                                email_payload['signal_type'])
+            except Exception as email_exc:
+                logger.error("Email notify error in _emit_live_signal: %s", email_exc)
+
             ts = last_zone["timestamp"]
             ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
 
@@ -605,21 +648,32 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             all_zones_out = [{
                 "is_bullish":   last_zone["is_bullish"],
                 "center_price": last_zone["center_price"],
+                "outer_top":    last_zone["outer_top"],
+                "outer_bottom": last_zone["outer_bottom"],
+                "core_top":     last_zone["core_top"],
+                "core_bottom":  last_zone["core_bottom"],
                 "timestamp":    ts_str,
                 "bar_index":    last_zone["bar_index"],
             }]
 
+            is_bull  = last_zone["is_bullish"]
+            entry_px = last_zone["center_price"]
+            sl_px    = last_zone["outer_bottom"] if is_bull else last_zone["outer_top"]
+            tgt_px   = last_zone["outer_top"]    if is_bull else last_zone["outer_bottom"]
+
             signal_payload = {
-                "type":       "signal",
-                "asset":      self.asset,
-                "timeframe":  self.timeframe,
-                "signal":     new_signal,
-                "is_bullish": last_zone["is_bullish"],
-                "price":      last_zone["center_price"],
-                "timestamp":  ts_str,
-                "bar_index":  last_zone["bar_index"],
-                "tracking":   status.get("tracking", ""),
-                "all_zones":  all_zones_out,
+                "type":        "signal",
+                "asset":       self.asset,
+                "timeframe":   self.timeframe,
+                "signal":      new_signal,
+                "is_bullish":  is_bull,
+                "price":       entry_px,
+                "stop_loss":   sl_px,
+                "target":      tgt_px,
+                "timestamp":   ts_str,
+                "bar_index":   last_zone["bar_index"],
+                "tracking":    status.get("tracking", ""),
+                "all_zones":   all_zones_out,
             }
 
             await self.channel_layer.group_send(

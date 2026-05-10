@@ -1,12 +1,12 @@
 'use client';
 
-// Force dynamic rendering (disable static optimization)
 export const dynamic = 'force-dynamic';
 
 import Link from 'next/link';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
+import { getWebSocketUrl } from '@/lib/config';
 
 interface SignalHistory {
   id: string;
@@ -20,19 +20,29 @@ interface SignalHistory {
   timeframe: string;
 }
 
-// ALL symbols and ALL timeframes — same as what reversal calculator uses
-const SYMBOLS = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'] as const;
+const SYMBOLS    = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'] as const;
 const TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d'] as const;
+type SymbolType = typeof SYMBOLS[number];
+type FilterType = 'ALL' | 'BUY' | 'SELL';
+
+function fmt(n: number | null): string {
+  if (n === null || n === undefined) return '—';
+  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 export default function SignalHistoryPage() {
   const router = useRouter();
   const { isAuthenticated, loading, user } = useAuth();
 
-  const [signals, setSignals]           = useState<SignalHistory[]>([]);
-  const [loadingSignals, setLoadingSignals] = useState(true);
-  const [lastUpdated, setLastUpdated]   = useState<Date | null>(null);
-  const [filter, setFilter]             = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
-  const [symbolFilter, setSymbolFilter] = useState<'ALL' | 'BTCUSD' | 'ETHUSD' | 'XAUUSD' | 'LTCUSD'>('ALL');
+  const [signals,       setSignals]       = useState<SignalHistory[]>([]);
+  const [loadingData,   setLoadingData]   = useState(true);
+  const [lastUpdated,   setLastUpdated]   = useState<Date | null>(null);
+  const [filter,        setFilter]        = useState<FilterType>('ALL');
+  const [symbolFilter,  setSymbolFilter]  = useState<'ALL' | SymbolType>('ALL');
+  const [liveCount,     setLiveCount]     = useState(0);  // count of live WS signals received
+
+  const wsRefs = useRef<WebSocket[]>([]);
+  const signalsRef = useRef<Map<string, SignalHistory>>(new Map());
 
   // Protect route
   useEffect(() => {
@@ -48,105 +58,162 @@ export default function SignalHistoryPage() {
     }
   }, [isAuthenticated, loading, user, router]);
 
-  // ── Core fetch — ALL symbols × ALL timeframes in PARALLEL ──────────────────
-  const fetchSignalHistory = useCallback(async () => {
+  // ── Fetch ALL historical signals in parallel ───────────────────────────────
+  const fetchAll = useCallback(async () => {
     if (!isAuthenticated) return;
-    setLoadingSignals(true);
-
+    setLoadingData(true);
     try {
-      // Build all fetch promises at once — parallel, not sequential
       const tasks = SYMBOLS.flatMap(symbol =>
         TIMEFRAMES.map(timeframe => ({
-          symbol,
-          timeframe,
-          promise: fetch(
+          symbol, timeframe,
+          p: fetch(
             `/api/trading/signal-history/${symbol}/?timeframe=${timeframe}`,
-            {
-              headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(8000),
-            }
-          )
-            .then(r => r.ok ? r.json() : null)
-            .catch(() => null),
+            { signal: AbortSignal.timeout(8000) }
+          ).then(r => r.ok ? r.json() : null).catch(() => null),
         }))
       );
+      const results = await Promise.all(tasks.map(t => t.p));
 
-      // Execute ALL requests in parallel — 28 calls in ~1-2s instead of 18s
-      const results = await Promise.all(tasks.map(t => t.promise));
-
-      const allSignals: SignalHistory[] = [];
-
+      const fresh = new Map<string, SignalHistory>();
       results.forEach((data, i) => {
         const { symbol, timeframe } = tasks[i];
         if (!data?.success || !data.signals?.length) return;
-
-        const converted = data.signals.map((signal: Record<string, unknown>, idx: number) => ({
-          id:         `${symbol}-${timeframe}-${idx}-${signal.timestamp}`,
-          timestamp:  signal.timestamp as string,
-          symbol,
-          action:     (signal.is_bullish ? 'BUY' : 'SELL') as 'BUY' | 'SELL',
-          entryPrice: signal.center_price as number,
-          stopLoss:   signal.stop_loss as number,
-          target:     signal.target as number,
-          status:     'OPEN' as const,
-          timeframe,
-        }));
-
-        allSignals.push(...converted);
+        (data.signals as Record<string, unknown>[]).forEach((s, idx) => {
+          const ts   = s.timestamp as string;
+          const bull = s.is_bullish as boolean;
+          const id   = `${symbol}-${timeframe}-${ts}-${idx}`;
+          const oTop = s.outer_top as number;
+          const oBot = s.outer_bottom as number;
+          fresh.set(id, {
+            id, timestamp: ts, symbol, timeframe,
+            action:     bull ? 'BUY' : 'SELL',
+            entryPrice: s.center_price as number,
+            stopLoss:   bull ? oBot : oTop,
+            target:     bull ? oTop : oBot,
+            status:     'OPEN',
+          });
+        });
       });
 
-      // Sort newest first
-      allSignals.sort((a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
+      // Merge with any live signals already received via WebSocket
+      for (const [k, v] of signalsRef.current) fresh.set(k, v);
 
-      // Keep last 5 months
-      const fiveMonthsAgo = new Date();
-      fiveMonthsAgo.setMonth(fiveMonthsAgo.getMonth() - 5);
-      const finalSignals = allSignals.filter(
-        s => new Date(s.timestamp) >= fiveMonthsAgo
+      signalsRef.current = fresh;
+      setSignals(
+        [...fresh.values()].sort(
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        )
       );
-
-      setSignals(finalSignals);
       setLastUpdated(new Date());
-    } catch (error) {
-      console.error('Error fetching signal history:', error);
+    } catch (e) {
+      console.error('History fetch error:', e);
     } finally {
-      setLoadingSignals(false);
+      setLoadingData(false);
     }
   }, [isAuthenticated]);
 
-  // Initial fetch when auth is ready
+  // ── Connect WebSocket for each symbol+timeframe to get INSTANT updates ────
+  // When a new signal fires on the live chart it broadcasts a 'signal' event.
+  // We intercept it here and prepend the new row immediately — no polling delay.
+  const connectLiveWS = useCallback(() => {
+    if (!isAuthenticated) return;
+
+    // Close any existing connections first
+    wsRefs.current.forEach(ws => ws.close());
+    wsRefs.current = [];
+
+    const wsBase = getWebSocketUrl();
+
+    SYMBOLS.forEach(symbol => {
+      TIMEFRAMES.forEach(timeframe => {
+        const url = `${wsBase}/ws/market/${symbol}/${timeframe}/`;
+        const ws  = new WebSocket(url);
+
+        ws.onmessage = (ev) => {
+          try {
+            const data = JSON.parse(ev.data as string) as Record<string, unknown>;
+
+            // Only handle signal events (not kline tick updates)
+            if (data.type !== 'signal') return;
+
+            const bull    = data.is_bullish as boolean;
+            const ts      = data.timestamp as string;
+            const asset   = data.asset as string;
+            const tf      = data.timeframe as string;
+            const entry   = data.price as number;
+            const sl      = data.stop_loss as number;
+            const tgt     = data.target as number;
+            const id      = `${asset}-${tf}-${ts}-live`;
+
+            const newSig: SignalHistory = {
+              id, timestamp: ts, symbol: asset, timeframe: tf,
+              action:     bull ? 'BUY' : 'SELL',
+              entryPrice: entry,
+              stopLoss:   sl   ?? null,
+              target:     tgt  ?? null,
+              status:     'OPEN',
+            };
+
+            signalsRef.current.set(id, newSig);
+
+            // Prepend to top of list — instant update, no delay
+            setSignals(prev => {
+              const exists = prev.find(s => s.id === id);
+              if (exists) return prev;
+              return [newSig, ...prev];
+            });
+            setLiveCount(c => c + 1);
+            setLastUpdated(new Date());
+          } catch { /* ignore parse errors */ }
+        };
+
+        ws.onerror   = () => {};  // silent — expected for closed streams
+        ws.onclose   = () => {};
+
+        wsRefs.current.push(ws);
+      });
+    });
+  }, [isAuthenticated]);
+
+  // Initial fetch
   useEffect(() => {
     if (!loading && isAuthenticated) {
-      fetchSignalHistory();
+      fetchAll();
     }
-  }, [isAuthenticated, loading, fetchSignalHistory]);
+  }, [isAuthenticated, loading, fetchAll]);
 
-  // Auto-refresh every 60 seconds — picks up new signals automatically
+  // Connect live WebSocket after initial data loads
   useEffect(() => {
     if (!isAuthenticated) return;
-    const interval = setInterval(fetchSignalHistory, 60_000);
-    return () => clearInterval(interval);
-  }, [isAuthenticated, fetchSignalHistory]);
+    connectLiveWS();
+    return () => {
+      wsRefs.current.forEach(ws => ws.close());
+      wsRefs.current = [];
+    };
+  }, [isAuthenticated, connectLiveWS]);
 
-  // Refresh when tab gets focus (user coming back to page)
+  // Auto-refresh historical data every 60 seconds
   useEffect(() => {
     if (!isAuthenticated) return;
-    const onFocus = () => fetchSignalHistory();
+    const iv = setInterval(fetchAll, 60_000);
+    return () => clearInterval(iv);
+  }, [isAuthenticated, fetchAll]);
+
+  // Refresh on tab focus
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const onFocus = () => fetchAll();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [isAuthenticated, fetchSignalHistory]);
+  }, [isAuthenticated, fetchAll]);
 
   // Stats
-  const stats = {
-    total: signals.length,
-    buy:   signals.filter(s => s.action === 'BUY').length,
-    sell:  signals.filter(s => s.action === 'SELL').length,
-  };
+  const total = signals.length;
+  const buys  = signals.filter(s => s.action === 'BUY').length;
+  const sells = signals.filter(s => s.action === 'SELL').length;
 
-  // Filter
-  const filteredSignals = signals.filter(s => {
+  // Filtered list
+  const filtered = signals.filter(s => {
     if (filter !== 'ALL' && s.action !== filter) return false;
     if (symbolFilter !== 'ALL' && s.symbol !== symbolFilter) return false;
     return true;
@@ -155,19 +222,15 @@ export default function SignalHistoryPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0a0e1a] flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent"></div>
-          <p className="mt-4 text-slate-400">Loading...</p>
-        </div>
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent" />
       </div>
     );
   }
-
   if (!isAuthenticated) return null;
 
   return (
     <div className="min-h-screen bg-[#0a0e1a]">
-      {/* Navigation */}
+      {/* Nav */}
       <nav className="border-b border-slate-800/50 bg-[#0f1419]">
         <div className="mx-auto max-w-7xl px-6">
           <div className="flex h-16 items-center justify-between">
@@ -178,15 +241,20 @@ export default function SignalHistoryPage() {
               <span className="text-xl font-bold text-white">SmartRisk</span>
             </Link>
             <div className="flex items-center gap-4">
+              {liveCount > 0 && (
+                <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-400 animate-pulse">
+                  ● {liveCount} live update{liveCount !== 1 ? 's' : ''}
+                </span>
+              )}
               <button
-                onClick={fetchSignalHistory}
-                disabled={loadingSignals}
+                onClick={fetchAll}
+                disabled={loadingData}
                 className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50 transition"
               >
-                {loadingSignals ? 'Refreshing…' : '↻ Refresh'}
+                {loadingData ? 'Loading…' : '↻ Refresh'}
               </button>
               <Link href="/dashboard" className="text-sm font-medium text-slate-400 hover:text-white transition">
-                ← Back to Dashboard
+                ← Dashboard
               </Link>
             </div>
           </div>
@@ -195,82 +263,59 @@ export default function SignalHistoryPage() {
 
       {/* Header */}
       <div className="border-b border-slate-800/50 bg-[#0f1419]">
-        <div className="mx-auto max-w-7xl px-6 py-8">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="mb-2 text-3xl font-bold text-white">SmartRisk Signal History</h1>
-              <p className="text-slate-400">
-                Complete history of all SmartRisk-generated trading signals from the last 5 months
-              </p>
-            </div>
-            {lastUpdated && (
-              <p className="text-xs text-slate-500 mt-1">
-                Updated {lastUpdated.toLocaleTimeString()} UTC
-              </p>
-            )}
+        <div className="mx-auto max-w-7xl px-6 py-8 flex items-start justify-between">
+          <div>
+            <h1 className="mb-2 text-3xl font-bold text-white">SmartRisk Signal History</h1>
+            <p className="text-slate-400">Last 5 months — all assets and timeframes — live updates via WebSocket</p>
           </div>
+          {lastUpdated && (
+            <p className="text-xs text-slate-500 mt-1 whitespace-nowrap">
+              Updated {lastUpdated.toISOString().replace('T', ' ').slice(0, 19)} UTC
+            </p>
+          )}
         </div>
       </div>
 
       {/* Stats */}
       <div className="border-b border-slate-800/50 bg-[#0f1419]">
-        <div className="mx-auto max-w-7xl px-6 py-6">
-          <div className="flex justify-center gap-6">
-            <div className="rounded-xl border border-slate-800/50 bg-[#0a0e1a] p-6 text-center min-w-[140px]">
-              {loadingSignals
-                ? <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent mb-1" />
-                : <div className="mb-1 text-4xl font-bold text-white">{stats.total}</div>
+        <div className="mx-auto max-w-7xl px-6 py-6 flex justify-center gap-6">
+          {[
+            { label: 'TOTAL SIGNALS', value: total, color: 'text-white' },
+            { label: 'BUY SIGNALS',   value: buys,  color: 'text-emerald-400' },
+            { label: 'SELL SIGNALS',  value: sells, color: 'text-rose-400' },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="rounded-xl border border-slate-800/50 bg-[#0a0e1a] p-6 text-center min-w-[140px]">
+              {loadingData && value === 0
+                ? <div className="inline-block h-8 w-8 mb-1 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent" />
+                : <div className={`mb-1 text-4xl font-bold ${color}`}>{value}</div>
               }
-              <div className="text-sm text-slate-500">TOTAL SIGNALS</div>
+              <div className="text-sm text-slate-500">{label}</div>
             </div>
-            <div className="rounded-xl border border-slate-800/50 bg-[#0a0e1a] p-6 text-center min-w-[140px]">
-              <div className="mb-1 text-4xl font-bold text-emerald-400">{stats.buy}</div>
-              <div className="text-sm text-slate-500">BUY SIGNALS</div>
-            </div>
-            <div className="rounded-xl border border-slate-800/50 bg-[#0a0e1a] p-6 text-center min-w-[140px]">
-              <div className="mb-1 text-4xl font-bold text-rose-400">{stats.sell}</div>
-              <div className="text-sm text-slate-500">SELL SIGNALS</div>
-            </div>
-          </div>
+          ))}
         </div>
       </div>
 
       {/* Filters */}
       <div className="mx-auto max-w-7xl px-6 py-6">
-        <div className="mb-6 flex flex-wrap items-center gap-4">
+        <div className="mb-6 flex flex-wrap items-center gap-6">
           <div>
             <label className="mb-2 block text-xs font-medium text-slate-400">FILTER BY ACTION</label>
             <div className="flex gap-2">
-              {(['ALL', 'BUY', 'SELL'] as const).map(action => (
-                <button
-                  key={action}
-                  onClick={() => setFilter(action)}
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                    filter === action
-                      ? 'bg-cyan-500 text-white'
-                      : 'border border-slate-700 bg-slate-800/50 text-slate-300 hover:bg-slate-700/50'
-                  }`}
-                >
-                  {action}
+              {(['ALL', 'BUY', 'SELL'] as const).map(f => (
+                <button key={f} onClick={() => setFilter(f)}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${filter === f ? 'bg-cyan-500 text-white' : 'border border-slate-700 bg-slate-800/50 text-slate-300 hover:bg-slate-700/50'}`}>
+                  {f}
                 </button>
               ))}
             </div>
           </div>
-
           <div>
             <label className="mb-2 block text-xs font-medium text-slate-400">FILTER BY SYMBOL</label>
             <div className="flex gap-2 flex-wrap">
-              {(['ALL', 'BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'] as const).map(sym => (
-                <button
-                  key={sym}
-                  onClick={() => setSymbolFilter(sym)}
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                    symbolFilter === sym
-                      ? 'bg-cyan-500 text-white'
-                      : 'border border-slate-700 bg-slate-800/50 text-slate-300 hover:bg-slate-700/50'
-                  }`}
-                >
-                  {sym}
+              {(['ALL', ...SYMBOLS] as const).map(s => (
+                <button key={s} onClick={() => setSymbolFilter(s as 'ALL' | SymbolType)}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${symbolFilter === s ? 'bg-cyan-500 text-white' : 'border border-slate-700 bg-slate-800/50 text-slate-300 hover:bg-slate-700/50'}`}>
+                  {s}
                 </button>
               ))}
             </div>
@@ -283,103 +328,77 @@ export default function SignalHistoryPage() {
             <table className="w-full">
               <thead className="border-b border-slate-800/50 bg-slate-950/50">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Date & Time (UTC)</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Symbol</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Timeframe</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Action</th>
-                  <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Entry Price</th>
-                  <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Stop Loss</th>
-                  <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Target</th>
-                  <th className="px-6 py-4 text-center text-xs font-semibold uppercase tracking-wider text-slate-400">Status</th>
+                  {['DATE & TIME (UTC)', 'SYMBOL', 'TIMEFRAME', 'ACTION', 'ENTRY PRICE', 'STOP LOSS', 'TARGET', 'STATUS'].map(h => (
+                    <th key={h} className={`px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400 ${h === 'ENTRY PRICE' || h === 'STOP LOSS' || h === 'TARGET' ? 'text-right' : h === 'STATUS' ? 'text-center' : 'text-left'}`}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/50">
-                {loadingSignals && signals.length === 0 ? (
+                {loadingData && signals.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center gap-3">
-                        <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent"></div>
-                        <p className="text-slate-400">Loading signals from all timeframes in parallel…</p>
+                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent" />
+                        <p className="text-slate-400">Loading all signals in parallel…</p>
                       </div>
                     </td>
                   </tr>
-                ) : filteredSignals.length === 0 ? (
+                ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-slate-400">
-                      No signals found matching your filters
+                    <td colSpan={8} className="px-6 py-12 text-center text-slate-400">No signals found</td>
+                  </tr>
+                ) : filtered.map(signal => (
+                  <tr key={signal.id} className="hover:bg-slate-800/30 transition">
+                    <td className="px-6 py-4 text-sm text-slate-300 whitespace-nowrap">
+                      {new Date(signal.timestamp).toISOString().replace('T', ' ').slice(0, 19)} UTC
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-white">
+                        {signal.symbol}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="rounded-full bg-blue-500/20 px-3 py-1 text-xs font-semibold text-blue-400">
+                        {signal.timeframe.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${signal.action === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                        {signal.action}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-medium text-white">{fmt(signal.entryPrice)}</td>
+                    <td className="px-6 py-4 text-right text-sm text-rose-400">{fmt(signal.stopLoss)}</td>
+                    <td className="px-6 py-4 text-right text-sm text-emerald-400">{fmt(signal.target)}</td>
+                    <td className="px-6 py-4 text-center">
+                      <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-400">OPEN</span>
                     </td>
                   </tr>
-                ) : (
-                  filteredSignals.map(signal => (
-                    <tr key={signal.id} className="hover:bg-slate-800/30 transition">
-                      <td className="px-6 py-4 text-sm text-slate-300">
-                        {/* Show UTC time — consistent with chart display */}
-                        {new Date(signal.timestamp).toISOString().replace('T', ' ').slice(0, 19)} UTC
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-white">
-                          {signal.symbol}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="rounded-full bg-blue-500/20 px-3 py-1 text-xs font-semibold text-blue-400">
-                          {signal.timeframe.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          signal.action === 'BUY'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-rose-500/20 text-rose-400'
-                        }`}>
-                          {signal.action}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right text-sm font-medium text-white">
-                        ${signal.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-6 py-4 text-right text-sm text-rose-400">
-                        {signal.stopLoss ? `$${signal.stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
-                      </td>
-                      <td className="px-6 py-4 text-right text-sm text-emerald-400">
-                        {signal.target ? `$${signal.target.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-400">
-                          {signal.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
-                )}
+                ))}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* Info */}
         <div className="mt-8 rounded-xl border border-slate-800/50 bg-[#0f1419] p-6">
           <h3 className="mb-4 text-lg font-bold text-white">Understanding Signal History</h3>
-          <div className="space-y-3 text-sm text-slate-400">
-            <p><strong className="text-white">Entry Price:</strong> The price at which the SmartRisk reversal signal was generated</p>
-            <p><strong className="text-white">Stop Loss:</strong> Recommended stop loss level (outer zone boundary)</p>
-            <p><strong className="text-white">Target:</strong> Recommended take profit level (outer zone boundary)</p>
-            <p><strong className="text-white">Timeframe:</strong> The chart timeframe on which the signal was detected</p>
-            <p><strong className="text-white">Status:</strong> OPEN — historical signals shown for reference</p>
+          <div className="space-y-2 text-sm text-slate-400">
+            <p><strong className="text-white">Entry Price:</strong> Center price of the reversal zone when signal fired</p>
+            <p><strong className="text-white">Stop Loss:</strong> Outer zone bottom (BUY) or outer zone top (SELL) — your risk boundary</p>
+            <p><strong className="text-white">Target:</strong> Outer zone top (BUY) or outer zone bottom (SELL) — your profit target</p>
+            <p><strong className="text-white">Live Updates:</strong> New signals appear instantly via WebSocket — no page refresh needed</p>
             <p className="mt-4 rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 text-cyan-300">
-              <strong>Note:</strong> History shows reversal signals from the last 5 months across all 4 assets
-              and all timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d). Automatically refreshes every 60 seconds.
+              Showing last 5 months · {SYMBOLS.length} assets · {TIMEFRAMES.length} timeframes · Auto-refreshes every 60s
             </p>
           </div>
         </div>
       </div>
 
-      {/* Footer */}
       <footer className="mt-16 border-t border-slate-800/50 bg-[#0f1419] py-8">
         <div className="mx-auto max-w-7xl px-6 text-center">
-          <p className="text-sm text-slate-500">
-            © 2026 SmartRisk. Powered by SmartRisk trading signals for crypto markets.
-          </p>
+          <p className="text-sm text-slate-500">© 2026 SmartRisk. Reversal signals for crypto markets.</p>
         </div>
       </footer>
     </div>

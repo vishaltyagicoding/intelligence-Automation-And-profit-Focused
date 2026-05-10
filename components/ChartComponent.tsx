@@ -188,6 +188,15 @@ export default function ChartComponent({
       watermark: { visible:false },
     });
 
+    // Per-asset price precision — matches TradingView display
+    const ASSET_PRICE_FMT: Record<string, {precision: number; minMove: number}> = {
+      'BTCUSD':  { precision: 2, minMove: 0.01 },   // $80,396.00
+      'ETHUSD':  { precision: 2, minMove: 0.01 },   // $2,316.30
+      'XAUUSD':  { precision: 2, minMove: 0.01 },   // $4,733.63
+      'LTCUSD':  { precision: 2, minMove: 0.01 },   // $58.01
+    };
+    const priceFmt = ASSET_PRICE_FMT[asset] ?? { precision: 2, minMove: 0.01 };
+
     const series = chart.addCandlestickSeries({
       upColor:          COLOR_UP,
       downColor:        COLOR_DOWN,
@@ -199,7 +208,7 @@ export default function ChartComponent({
       priceLineVisible: true,
       priceLineColor:   COLOR_UP,
       priceLineWidth:   1,
-      priceFormat: { type:'price', precision:2, minMove:0.01 },
+      priceFormat: { type: 'price', ...priceFmt },
     });
 
     chartRef.current  = chart;
@@ -569,8 +578,12 @@ export default function ChartComponent({
     const loadHistory = async () => {
       try {
         // PAXG special case: XAUUSD uses paxgusdt on Binance (gold-backed token)
+        // Asset → Binance.US symbol mapping
         const ASSET_TO_BINANCE: Record<string, string> = {
-          'XAUUSD': 'PAXGUSDT',
+          'XAUUSD': 'PAXGUSDT',   // Paxos Gold on Binance.US
+          'BTCUSD': 'BTCUSDT',
+          'ETHUSD': 'ETHUSDT',
+          'LTCUSD': 'LTCUSDT',
         };
         const sym = ASSET_TO_BINANCE[asset] ?? asset.replace('USD', 'USDT');
         // Candle limits sized to cover the DB signal history window per timeframe

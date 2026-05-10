@@ -356,16 +356,18 @@ def get_signal_history(request, symbol):
             core_top = float(rec.core_top)
             core_bot = float(rec.core_bottom)
 
+            # Use outer zone boundaries for stop_loss and target
+            # This matches exactly what tasks.py sends in email alerts
+            # and gives meaningful risk levels (not nearly identical to entry)
+            outer_top = float(rec.outer_top)
+            outer_bot = float(rec.outer_bottom)
+
             if is_bull:  # BUY signal
-                target = core_top
-                # For BUY: calculate = target - entry, stoploss = entry - (calculate * 0.5)
-                calculate = target - entry
-                stop_loss = entry - (calculate * 0.5)
+                stop_loss = outer_bot   # Stop below the outer zone bottom
+                target    = outer_top   # Target at the outer zone top
             else:  # SELL signal
-                target = core_bot
-                # For SELL: calculate = entry - target, stoploss = target + (calculate * 0.5)
-                calculate = entry - target
-                stop_loss = target + (calculate * 0.5)
+                stop_loss = outer_top   # Stop above the outer zone top
+                target    = outer_bot   # Target at the outer zone bottom
 
             signals.append({
                 'bar_index':    rec.bar_index,

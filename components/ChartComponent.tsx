@@ -274,39 +274,51 @@ export default function ChartComponent({
     let socket: WebSocket | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // ── Apply a single kline payload to the candle map + chart ────────────
+    // ── Apply a single kline payload to the candle map + chart ─────────────
+    // This handles all 3 cases that TradingView handles internally:
+    //   1. Full OHLCV from closed candle  → use exactly as-is
+    //   2. Partial OHLCV from open candle → update existing or create new
+    //   3. Tick-only (close/price only)   → update existing candle's close/high/low
     const applyKline = (p: KlinePayload) => {
       const ts    = toUnix(p.timestamp ?? p.time);
-      const open  = toFloat(p.open);
-      const high  = toFloat(p.high);
-      const low   = toFloat(p.low);
       const close = toFloat(p.close ?? p.price);
-      if (!close) return;
+      if (!close || !Number.isFinite(close)) return;
+
+      const open  = toFloat(p.open,  0);
+      const high  = toFloat(p.high,  0);
+      const low   = toFloat(p.low,   0);
 
       const interval = TF_SEC[timeframe];
-      // Backend already sends candle-start timestamp, but snap anyway to be safe
-      const start = Math.floor(ts / interval) * interval;
+      const start    = Math.floor(ts / interval) * interval;
+      const existing = candles.get(start);
 
-      const hasOHLC = open > 0 && high > 0 && low > 0;
+      let candle: CandleDataPoint;
 
-      if (hasOHLC) {
-        // Real Binance kline OHLCV — exact match
-        candles.set(start, { time: start as Time, open, high, low, close });
+      const hasFullOHLC = open > 0 && high > 0 && low > 0 && high >= low;
+
+      if (hasFullOHLC) {
+        // Case 1 & 2: Backend sends real OHLCV from Binance kline stream
+        // Always trust the server's open/high/low/close — same as TradingView
+        candle = { time: start as Time, open, high, low, close };
+        candles.set(start, candle);
+      } else if (existing) {
+        // Case 3: Only close price available — update the running candle
+        // This happens during REST fallback or tick-only feeds
+        existing.close = close;
+        existing.high  = Math.max(existing.high, close);
+        existing.low   = Math.min(existing.low,  close);
+        candle = existing;
       } else {
-        // Tick fallback (should not happen with our backend)
-        const existing = candles.get(start);
-        if (!existing) {
-          const prev = close;
-          candles.set(start, { time: start as Time, open: prev, high: close, low: close, close });
-        } else {
-          existing.high  = Math.max(existing.high, close);
-          existing.low   = Math.min(existing.low,  close);
-          existing.close = close;
-        }
+        // Case 3b: No existing candle — initialise from close price
+        // Use last known close as open (correct TradingView behavior)
+        const sortedKeys = [...candles.keys()].sort((a, b) => a - b);
+        const lastKey    = sortedKeys.length > 0 ? sortedKeys[sortedKeys.length - 1] : null;
+        const prevClose  = lastKey !== null ? (candles.get(lastKey)?.close ?? close) : close;
+        candle = { time: start as Time, open: prevClose, high: close, low: close, close };
+        candles.set(start, candle);
       }
 
       setLastPrice(close);
-      const candle = candles.get(start)!;
       try { seriesRef.current?.update(candle); } catch { /* ignore */ }
     };
 

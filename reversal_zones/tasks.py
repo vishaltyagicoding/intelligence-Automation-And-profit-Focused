@@ -275,20 +275,18 @@ def _send_signal_notifications(symbol: str, timeframe: str, new_signals: list):
 
             is_bull    = zone.is_bullish
             entry      = float(zone.center_price)
-            core_top   = float(zone.core_top)
-            core_bot   = float(zone.core_bottom)
+            outer_top  = float(zone.outer_top)
+            outer_bot  = float(zone.outer_bottom)
 
-            # Calculate target and stop loss using user's formula
-            if is_bull:  # BUY signal
-                target = core_top
-                # For BUY: calculate = target - entry, stoploss = entry - (calculate * 0.5)
-                calculate = target - entry
-                stop_loss = entry - (calculate * 0.5)
-            else:  # SELL signal
-                target = core_bot
-                # For SELL: calculate = entry - target, stoploss = target + (calculate * 0.5)
-                calculate = entry - target
-                stop_loss = target + (calculate * 0.5)
+            # Use outer zone boundaries — same as views.py and history page
+            # BUY:  stop_loss = outer_bottom (below zone), target = outer_top (above zone)
+            # SELL: stop_loss = outer_top   (above zone), target = outer_bottom (below zone)
+            if is_bull:
+                stop_loss = outer_bot
+                target    = outer_top
+            else:
+                stop_loss = outer_top
+                target    = outer_bot
 
             ts_str = zone.reversal_time.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 

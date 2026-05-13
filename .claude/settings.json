@@ -1,0 +1,96 @@
+{
+  "project": {
+    "name": "SmartRisk",
+    "version": "1.0.0",
+    "description": "Cryptocurrency trading signal platform with real-time reversal zone analysis",
+    "repository": "https://github.com/vishaltyagicoding/intelligence-Automation-And-profit-Focused",
+    "domain": "smartriskfx.com"
+  },
+  "contacts": {
+    "admin": "alberttyagi123@gmail.com",
+    "support": "smarttriskfx@gmail.com"
+  },
+  "server": {
+    "provider": "AWS EC2",
+    "region": "us-west-1",
+    "ip": "54.183.178.141",
+    "os": "Ubuntu 26.04 LTS"
+  },
+  "tech_stack": {
+    "frontend": {
+      "framework": "Next.js 14",
+      "language": "TypeScript 5.x",
+      "styling": "TailwindCSS 3.x",
+      "charts": "Lightweight Charts"
+    },
+    "backend": {
+      "framework": "Django 5.0",
+      "api": "Django REST Framework",
+      "websocket": "Django Channels",
+      "task_queue": "Celery + Redis",
+      "database": "PostgreSQL 16"
+    },
+    "infrastructure": {
+      "containerization": "Docker + Docker Compose",
+      "web_server": "Nginx",
+      "ssl": "Let's Encrypt",
+      "ci_cd": "GitHub Actions"
+    }
+  },
+  "supported_assets": [
+    "BTCUSD",
+    "ETHUSD",
+    "XAUUSD",
+    "LTCUSD"
+  ],
+  "timeframes": [
+    "5m",
+    "15m",
+    "30m",
+    "1h",
+    "2h",
+    "4h",
+    "1d"
+  ],
+  "defaults": {
+    "timeframe": "15m",
+    "signal_frequency": "15 minutes",
+    "trial_duration": "3 days",
+    "data_source": "Binance.US"
+  },
+  "admin_accounts": [
+    {
+      "email": "alberttyagi123@gmail.com",
+      "password": "SmartRisk@2026!"
+    },
+    {
+      "email": "pythonbyvishal@gmail.com",
+      "password": "SmartRisk@2026!"
+    }
+  ],
+  "important_notes": {
+    "container_name": "django (NOT 'backend')",
+    "env_file": ".env (NOT .env.production)",
+    "docker_compose": "docker-compose.yml (NOT docker-compose.prod.yml)",
+    "token_name": "access_token (NOT 'auth_token')",
+    "binance_api": "api.binance.us (NOT api.binance.com)"
+  },
+  "signal_calculation": {
+    "buy": {
+      "entry": "center_price",
+      "target": "outer_top",
+      "calculate": "target - entry",
+      "stoploss": "entry - (calculate * 0.5)"
+    },
+    "sell": {
+      "entry": "center_price",
+      "target": "outer_bottom",
+      "calculate": "entry - target",
+      "stoploss": "target + (calculate * 0.5)"
+    }
+  },
+  "anti_chop_filter": {
+    "min_time_gap": "1 hour",
+    "alternation": "strict (BUY → SELL → BUY)"
+  }
+}

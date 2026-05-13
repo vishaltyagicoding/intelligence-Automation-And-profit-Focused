@@ -224,49 +224,64 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             backoff = min(backoff * 2, 60)  # cap at 60s
 
     async def fetch_and_broadcast_rest_price(self):
-        """Fetch current price via REST API and broadcast to clients."""
+        """
+        Fetch real OHLCV candle via REST API (klines endpoint) and broadcast.
+        Using /api/v3/klines gives true open/high/low/close — identical to
+        what TradingView displays. The old ticker endpoint only returned close
+        price, making open=high=low=close (flat, broken-looking candles).
+        """
         try:
             import aiohttp
-            
-            # Fetch ticker price from Binance.US REST API
-            url = f"https://api.binance.us/api/v3/ticker/price?symbol={self.binance_symbol.upper()}"
-            
+
+            url = (f"https://api.binance.us/api/v3/klines"
+                   f"?symbol={self.binance_symbol.upper()}"
+                   f"&interval={self.binance_interval}&limit=2")
+
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as response:
                     if response.status == 200:
                         data = await response.json()
-                        price = float(data.get('price', 0))
-                        
-                        if price > 0:
-                            # Create a kline-like payload
-                            timestamp = int(time.time())
-                            processed_data = {
-                                "asset": self.asset,
-                                "symbol": self.asset,
-                                "timestamp": timestamp,
-                                "time": timestamp,
-                                "open": price,
-                                "high": price,
-                                "low": price,
-                                "close": price,
-                                "price": price,
-                                "volume": 0,
-                                "is_closed": False,
-                                "timeframe": self.timeframe,
-                            }
-                            
-                            # Broadcast to clients
-                            await self.channel_layer.group_send(
-                                f"market_{self.asset}_{self.timeframe}",
-                                {
-                                    "type": "market_update",
-                                    "data": processed_data,
-                                },
-                            )
-                            
-                            logger.info("REST API price fetched for %s: %.2f", self.asset, price)
+                        if not data or not isinstance(data, list):
+                            logger.warning("REST klines returned empty for %s", self.asset)
+                            return
+
+                        # Take the most recent candle (last element)
+                        k = data[-1]
+                        kline_start_ms = int(k[0])
+                        open_p  = float(k[1])
+                        high_p  = float(k[2])
+                        low_p   = float(k[3])
+                        close_p = float(k[4])
+                        volume  = float(k[5])
+                        timestamp = kline_start_ms // 1000
+
+                        if close_p <= 0:
+                            return
+
+                        processed_data = {
+                            "asset":     self.asset,
+                            "symbol":    self.asset,
+                            "timestamp": timestamp,
+                            "time":      timestamp,
+                            "open":      open_p,
+                            "high":      high_p,
+                            "low":       low_p,
+                            "close":     close_p,
+                            "price":     close_p,
+                            "volume":    volume,
+                            "is_closed": False,
+                            "timeframe": self.timeframe,
+                        }
+
+                        await self.channel_layer.group_send(
+                            f"market_{self.asset}_{self.timeframe}",
+                            {"type": "market_update", "data": processed_data},
+                        )
+
+                        logger.info("REST OHLCV fetched for %s: O=%.2f H=%.2f L=%.2f C=%.2f",
+                                    self.asset, open_p, high_p, low_p, close_p)
                     else:
-                        logger.error("REST API returned status %d for %s", response.status, self.asset)
+                        logger.error("REST klines status %d for %s", response.status, self.asset)
         except Exception as exc:
             logger.error("Error fetching REST price for %s: %s", self.asset, exc)
 

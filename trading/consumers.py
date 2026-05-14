@@ -18,11 +18,11 @@ from django.conf import settings
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 
-# Binance.US — required because the server is hosted in USA (California).
-# AWS/US servers are geo-blocked by Binance.com. Binance.US works reliably.
-# The frontend also uses Binance.US REST so historical + live data are identical.
-BINANCE_US_API_URL = "https://api.binance.us"
-BINANCE_US_WS_URL  = "wss://stream.binance.us:9443"
+# Binance.com (global exchange) — same data source as TradingView.
+# This ensures candle colors (green/red) match TradingView exactly.
+# The frontend also uses Binance.com REST so historical + live data are identical.
+BINANCE_API_URL = "https://api.binance.com"
+BINANCE_WS_URL  = "wss://stream.binance.com:9443"
 
 from .models import MarketSignal
 import pandas as pd
@@ -175,10 +175,10 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
 
     async def stream_binance_data(self):
         """
-        Stream kline data using raw aiohttp WebSocket to Binance.US.
-        Connects directly to wss://stream.binance.us:9443/ws/{symbol}@kline_{interval}
-        Server is hosted in California (USA) — Binance.com is geo-blocked for US servers.
-        Frontend REST history also uses Binance.US for data consistency.
+        Stream kline data using raw aiohttp WebSocket to Binance.com (global).
+        Connects directly to wss://stream.binance.com:9443/ws/{symbol}@kline_{interval}
+        Uses Binance.com (same data source as TradingView) for accurate candle matching.
+        Frontend REST history also uses Binance.com for perfect data consistency.
         Auto-reconnects on disconnect with exponential backoff.
         """
         import aiohttp
@@ -186,9 +186,9 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
 
         symbol    = self.binance_symbol.lower()
         interval  = self.binance_interval
-        # Binance.US stream — server is in California (US); binance.com is geo-blocked
-        # for US-hosted servers. Frontend REST also uses Binance.US for consistency.
-        ws_url    = f"wss://stream.binance.us:9443/ws/{symbol}@kline_{interval}"
+        # Binance.com stream — same data source as TradingView for accurate candle colors
+        # Frontend REST also uses Binance.com for perfect OHLC consistency
+        ws_url    = f"wss://stream.binance.com:9443/ws/{symbol}@kline_{interval}"
         backoff   = 1
 
         while True:
@@ -200,7 +200,7 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                         receive_timeout=30,
                         ssl=True,
                     ) as ws:
-                        logger.info("Binance.com raw WS connected: %s @kline_%s", symbol, interval)
+                        logger.info("Binance.com (global) WS connected: %s @kline_%s", symbol, interval)
                         backoff = 1  # reset on success
 
                         async for msg in ws:
@@ -220,10 +220,10 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                                 break
 
             except asyncio.CancelledError:
-                logger.info("Binance.US stream cancelled for %s", self.asset)
+                logger.info("Binance.com stream cancelled for %s", self.asset)
                 raise
             except Exception as exc:
-                logger.error("Binance.US WS error for %s: %s — retrying in %ds", self.asset, exc, backoff)
+                logger.error("Binance.com WS error for %s: %s — retrying in %ds", self.asset, exc, backoff)
                 await self.fetch_and_broadcast_rest_price()
 
             await asyncio.sleep(backoff)
@@ -239,8 +239,8 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         try:
             import aiohttp
 
-            # Binance.US REST (server is in California — binance.com is geo-blocked for US servers)
-            url = (f"https://api.binance.us/api/v3/klines"
+            # Binance.com REST (global exchange — same data source as TradingView)
+            url = (f"https://api.binance.com/api/v3/klines"
                    f"?symbol={self.binance_symbol.upper()}"
                    f"&interval={self.binance_interval}&limit=2")
 

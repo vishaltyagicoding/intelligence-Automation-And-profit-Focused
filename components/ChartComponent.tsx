@@ -632,10 +632,10 @@ export default function ChartComponent({
     const loadHistory = async () => {
       try {
         // PAXG special case: XAUUSD uses paxgusdt on Binance (gold-backed token)
-        // Asset → Binance.US symbol mapping.
-        // NOTE: We deliberately use Binance.US (not .com) here so that the historical
-        // REST candles are from the SAME exchange as the live WebSocket stream from the
-        // backend. Mixing sources causes candle color flips and open-price mismatches.
+        // Asset → Binance symbol mapping.
+        // NOTE: We use Binance.com (global exchange) here — the SAME data source
+        // as TradingView — so candle colors (green/red) match exactly.
+        // The backend WebSocket also uses Binance.com for perfect consistency.
         const ASSET_TO_BINANCE: Record<string, string> = {
           'XAUUSD': 'PAXGUSDT',
           'BTCUSD': 'BTCUSDT',
@@ -653,11 +653,11 @@ export default function ChartComponent({
           '1d':  180,
         };
         const limit = TF_LIMIT[timeframe] ?? 1000;
-        // Binance.US — same source as the Django backend WebSocket stream.
-        // Both historical REST and live WS data now come from the same exchange,
+        // Binance.com (global) — same data source as TradingView for accurate candle colors.
+        // Both historical REST and live WS data now come from the same exchange as TradingView,
         // so open prices at candle boundaries always match perfectly.
         const res = await fetch(
-          `https://api.binance.us/api/v3/klines?symbol=${sym}&interval=${TF_BINANCE[timeframe]}&limit=${limit}`
+          `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${TF_BINANCE[timeframe]}&limit=${limit}`
         );
         const raw = await res.json();
         if (gone.current) return;

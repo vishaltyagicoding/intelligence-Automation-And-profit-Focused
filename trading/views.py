@@ -173,7 +173,8 @@ def get_reversal_zones(request, symbol):
         return Response(cached)
 
     try:
-        # ── Step 1: Fetch OHLCV from Binance ─────────────────────────────────
+        # Binance.US — server is in California; binance.com is geo-blocked for US servers.
+        # Frontend REST also uses Binance.US so historical + live data are always in sync.
         limit = 500 if timeframe == '1d' else 1000
         url = (
             f"https://api.binance.us/api/v3/klines"

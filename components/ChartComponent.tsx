@@ -140,9 +140,32 @@ export default function ChartComponent({
   const [signalStatus, setSignalStatus] = useState<{last_signal:string; tracking:string}|null>(null);
   const [sigLoading,   setSigLoading]   = useState(false);
 
+  // ── Detect user's browser timezone (TradingView behavior) ─────────────────
+  // Resolved ONCE on mount — same technique TradingView uses to auto-select
+  // the correct timezone for every visitor regardless of their country.
+  // Indian users see IST (UTC+5:30), US users see their local time, etc.
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   // ── Create chart (once) ────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // Format a Unix timestamp (seconds) in the user's detected local timezone.
+    // This mirrors TradingView's auto-timezone detection exactly:
+    //   - Indian visitor     → "2026-05-14 23:39" (IST, UTC+5:30)
+    //   - US/Pacific visitor → "2026-05-14 10:09" (PDT, UTC-7)
+    //   - UK visitor         → "2026-05-14 17:09" (BST, UTC+1)
+    const formatTimeLocal = (unixSec: number): string => {
+      return new Intl.DateTimeFormat(undefined, {
+        year:     '2-digit',
+        month:    '2-digit',
+        day:      '2-digit',
+        hour:     '2-digit',
+        minute:   '2-digit',
+        hour12:   false,
+        timeZone: userTimezone,
+      }).format(new Date(unixSec * 1000)).replace(',', '');
+    };
 
     const chart = createChart(containerRef.current, {
       autoSize: true,
@@ -165,14 +188,10 @@ export default function ChartComponent({
         scaleMargins: { top: 0.08, bottom: 0.08 },
       },
       localization: {
-        // Force UTC display — prevents IST (UTC+5:30) or any local timezone
-        // from shifting the chart's time axis. All candles show UTC time.
-        timeFormatter: (time: number) => {
-          const d = new Date(time * 1000);
-          const pad = (n: number) => String(n).padStart(2, '0');
-          return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ` +
-                 `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
-        },
+        // Dynamic timezone — same as TradingView's auto-detect behavior.
+        // Shows times in the user's local timezone: IST for India, PST/PDT for
+        // California, GMT/BST for UK, etc. Changes automatically based on browser.
+        timeFormatter: formatTimeLocal,
       },
       timeScale: {
         borderColor: 'rgba(148,163,184,0.2)',
@@ -275,10 +294,14 @@ export default function ChartComponent({
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
     // ── Apply a single kline payload to the candle map + chart ─────────────
-    // This handles all 3 cases that TradingView handles internally:
-    //   1. Full OHLCV from closed candle  → use exactly as-is
-    //   2. Partial OHLCV from open candle → update existing or create new
-    //   3. Tick-only (close/price only)   → update existing candle's close/high/low
+    // Handles all 3 cases identical to TradingView's internal logic:
+    //   1. Full OHLCV from any candle (closed or open) → use exactly as-is
+    //   2. Partial OHLCV — open is 0 but existing candle exists → merge with preserved open
+    //   3. Tick-only (close/price only) → update running candle's close/high/low
+    //
+    // CRITICAL: The candle's OPEN price is NEVER changed after the candle starts.
+    // This is the TradingView rule — open is fixed at the first trade of the period.
+    // Changing open mid-candle is what causes the color flip (green↔red) bug.
     const applyKline = (p: KlinePayload) => {
       const ts    = toUnix(p.timestamp ?? p.time);
       const close = toFloat(p.close ?? p.price);
@@ -289,28 +312,47 @@ export default function ChartComponent({
       const low   = toFloat(p.low,   0);
 
       const interval = TF_SEC[timeframe];
+      // Snap to candle boundary — identical to TradingView's bar alignment
       const start    = Math.floor(ts / interval) * interval;
       const existing = candles.get(start);
 
       let candle: CandleDataPoint;
 
+      // hasFullOHLC: backend sends real OHLCV from Binance stream.
+      // Only trust open > 0 AND high >= low (valid range).
       const hasFullOHLC = open > 0 && high > 0 && low > 0 && high >= low;
 
       if (hasFullOHLC) {
-        // Case 1 & 2: Backend sends real OHLCV from Binance kline stream
-        // Always trust the server's open/high/low/close — same as TradingView
-        candle = { time: start as Time, open, high, low, close };
+        if (existing) {
+          // Update the running candle — PRESERVE the original open price.
+          // TradingView NEVER changes a candle's open mid-period; changing it
+          // flips the candle color (green↔red). Use the FIRST open we ever saw.
+          candle = {
+            time:  start as Time,
+            open:  existing.open,   // ← ALWAYS keep the original open
+            high:  Math.max(existing.high, high),
+            low:   Math.min(existing.low,  low),
+            close,
+          };
+        } else {
+          // New candle period — this is the very first update for this bar.
+          // Trust the server's open value completely.
+          candle = { time: start as Time, open, high, low, close };
+        }
         candles.set(start, candle);
       } else if (existing) {
-        // Case 3: Only close price available — update the running candle
-        // This happens during REST fallback or tick-only feeds
-        existing.close = close;
-        existing.high  = Math.max(existing.high, close);
-        existing.low   = Math.min(existing.low,  close);
-        candle = existing;
+        // Case 3: Only close price available — update the running candle.
+        // This happens during REST fallback or tick-only feeds.
+        candle = {
+          ...existing,
+          close,
+          high:  Math.max(existing.high, close),
+          low:   Math.min(existing.low,  close),
+        };
+        candles.set(start, candle);
       } else {
-        // Case 3b: No existing candle — initialise from close price
-        // Use last known close as open (correct TradingView behavior)
+        // Case 3b: No existing candle — initialise from close price.
+        // Use last known close as open (correct TradingView behavior for gap candles).
         const sortedKeys = [...candles.keys()].sort((a, b) => a - b);
         const lastKey    = sortedKeys.length > 0 ? sortedKeys[sortedKeys.length - 1] : null;
         const prevClose  = lastKey !== null ? (candles.get(lastKey)?.close ?? close) : close;
@@ -590,27 +632,31 @@ export default function ChartComponent({
     const loadHistory = async () => {
       try {
         // PAXG special case: XAUUSD uses paxgusdt on Binance (gold-backed token)
-        // Asset → Binance.US symbol mapping
+        // Asset → Binance.US symbol mapping.
+        // NOTE: We deliberately use Binance.US (not .com) here so that the historical
+        // REST candles are from the SAME exchange as the live WebSocket stream from the
+        // backend. Mixing sources causes candle color flips and open-price mismatches.
         const ASSET_TO_BINANCE: Record<string, string> = {
-          'XAUUSD': 'PAXGUSDT',   // Paxos Gold on Binance.US
+          'XAUUSD': 'PAXGUSDT',
           'BTCUSD': 'BTCUSDT',
           'ETHUSD': 'ETHUSDT',
           'LTCUSD': 'LTCUSDT',
         };
         const sym = ASSET_TO_BINANCE[asset] ?? asset.replace('USD', 'USDT');
-        // Candle limits sized to cover the DB signal history window per timeframe
-        // Prevents out-of-window signals from clustering on the first candle
         const TF_LIMIT: Record<Timeframe, number> = {
-          '5m':  1000,  // ~3.5d
-          '15m': 1000,  // ~10d
-          '30m': 1000,  // ~21d
-          '1h':  750,   // ~31d ✅
-          '2h':  375,   // ~31d ✅
-          '4h':  200,   // ~33d ✅
-          '1d':  180,   // 180d (6 months) ✅
+          '5m':  1000,
+          '15m': 1000,
+          '30m': 1000,
+          '1h':  750,
+          '2h':  375,
+          '4h':  200,
+          '1d':  180,
         };
         const limit = TF_LIMIT[timeframe] ?? 1000;
-        const res   = await fetch(
+        // Binance.US — same source as the Django backend WebSocket stream.
+        // Both historical REST and live WS data now come from the same exchange,
+        // so open prices at candle boundaries always match perfectly.
+        const res = await fetch(
           `https://api.binance.us/api/v3/klines?symbol=${sym}&interval=${TF_BINANCE[timeframe]}&limit=${limit}`
         );
         const raw = await res.json();
@@ -693,6 +739,14 @@ export default function ChartComponent({
             <span className="text-slate-400">Price: </span>
             <span className="font-bold text-white">
               {lastPrice === null ? '—' : lastPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+            </span>
+          </div>
+
+          {/* Dynamic timezone badge — exactly like TradingView shows "UTC+5:30" etc. */}
+          <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm" title="Chart times are displayed in your local timezone">
+            <span className="text-slate-400">TZ: </span>
+            <span className="font-medium text-cyan-300">
+              {userTimezone.split('/').slice(-1)[0].replace(/_/g, ' ')}
             </span>
           </div>
 

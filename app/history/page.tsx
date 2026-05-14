@@ -114,7 +114,8 @@ export default function SignalHistoryPage() {
 
   // ── Connect WebSocket for each symbol+timeframe to get INSTANT updates ────
   // When a new signal fires on the live chart it broadcasts a 'signal' event.
-  // We intercept it here and prepend the new row immediately — no polling delay.
+  // We intercept it here, prepend the new row immediately for instant UI update,
+  // then trigger a full fetchAll() so ALL historical rows are also refreshed.
   const connectLiveWS = useCallback(() => {
     if (!isAuthenticated) return;
 
@@ -156,7 +157,7 @@ export default function SignalHistoryPage() {
 
             signalsRef.current.set(id, newSig);
 
-            // Prepend to top of list — instant update, no delay
+            // Step 1: Prepend new signal to top of list INSTANTLY — no delay
             setSignals(prev => {
               const exists = prev.find(s => s.id === id);
               if (exists) return prev;
@@ -164,6 +165,14 @@ export default function SignalHistoryPage() {
             });
             setLiveCount(c => c + 1);
             setLastUpdated(new Date());
+
+            // Step 2: Trigger full refresh of ALL historical data from the DB.
+            // This ensures Date & Time, Symbol, Timeframe, Action, Entry Price,
+            // Stop Loss, Target and Status are all up-to-date across every row.
+            // Small delay lets the backend finish writing to DB first.
+            setTimeout(() => {
+              fetchAll();
+            }, 2000);
           } catch { /* ignore parse errors */ }
         };
 
@@ -173,7 +182,7 @@ export default function SignalHistoryPage() {
         wsRefs.current.push(ws);
       });
     });
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fetchAll]);
 
   // Initial fetch
   useEffect(() => {

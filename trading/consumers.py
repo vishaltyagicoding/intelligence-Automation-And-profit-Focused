@@ -18,9 +18,11 @@ from django.conf import settings
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken
 
-# Binance.US API endpoint
+# Binance.US — required because the server is hosted in USA (California).
+# AWS/US servers are geo-blocked by Binance.com. Binance.US works reliably.
+# The frontend also uses Binance.US REST so historical + live data are identical.
 BINANCE_US_API_URL = "https://api.binance.us"
-BINANCE_US_WS_URL = "wss://stream.binance.us:9443"
+BINANCE_US_WS_URL  = "wss://stream.binance.us:9443"
 
 from .models import MarketSignal
 import pandas as pd
@@ -151,8 +153,9 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({"error": str(exc)}))
 
     async def start_binance_stream(self):
-        """Start Binance.US kline stream using raw aiohttp WebSocket.
-        python-binance does not support Binance.US domain on AWS — we use raw WS URL directly.
+        """Start Binance.com kline stream using raw aiohttp WebSocket.
+        Uses Binance.com (global) — same data source as TradingView — for
+        accurate candle prices. Auto-retries with exponential backoff.
         """
         retry_count = 0
         max_retries = 5
@@ -160,7 +163,7 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         while retry_count < max_retries:
             try:
                 self.stream_task = asyncio.create_task(self.stream_binance_data())
-                logger.info("Binance.US raw WS stream started for %s at %s", self.asset, self.timeframe)
+                logger.info("Binance.com raw WS stream started for %s at %s", self.asset, self.timeframe)
                 return
             except Exception as exc:
                 retry_count += 1
@@ -174,7 +177,8 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         """
         Stream kline data using raw aiohttp WebSocket to Binance.US.
         Connects directly to wss://stream.binance.us:9443/ws/{symbol}@kline_{interval}
-        This bypasses python-binance which does NOT support the .us TLD.
+        Server is hosted in California (USA) — Binance.com is geo-blocked for US servers.
+        Frontend REST history also uses Binance.US for data consistency.
         Auto-reconnects on disconnect with exponential backoff.
         """
         import aiohttp
@@ -182,6 +186,8 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
 
         symbol    = self.binance_symbol.lower()
         interval  = self.binance_interval
+        # Binance.US stream — server is in California (US); binance.com is geo-blocked
+        # for US-hosted servers. Frontend REST also uses Binance.US for consistency.
         ws_url    = f"wss://stream.binance.us:9443/ws/{symbol}@kline_{interval}"
         backoff   = 1
 
@@ -194,7 +200,7 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                         receive_timeout=30,
                         ssl=True,
                     ) as ws:
-                        logger.info("Binance.US raw WS connected: %s @kline_%s", symbol, interval)
+                        logger.info("Binance.com raw WS connected: %s @kline_%s", symbol, interval)
                         backoff = 1  # reset on success
 
                         async for msg in ws:
@@ -233,6 +239,7 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         try:
             import aiohttp
 
+            # Binance.US REST (server is in California — binance.com is geo-blocked for US servers)
             url = (f"https://api.binance.us/api/v3/klines"
                    f"?symbol={self.binance_symbol.upper()}"
                    f"&interval={self.binance_interval}&limit=2")

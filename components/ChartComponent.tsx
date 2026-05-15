@@ -64,6 +64,8 @@ interface ChartComponentProps {
   timeframe: Timeframe;
   onTimeframeChange: (timeframe: Timeframe) => void;
   showFullDashboardButton?: boolean;
+  /** Called every time the chart receives a new price tick — used to sync watchlist prices */
+  onPriceUpdate?: (asset: WatchlistAsset, price: number) => void;
 }
 
 
@@ -111,6 +113,11 @@ const TF_SEC: Record<Timeframe, number> = {
 const COLOR_UP   = '#26a69a';   // teal  (bullish candle)
 const COLOR_DOWN = '#ef5350';   // red   (bearish candle)
 
+// ── How long (ms) with no WS message before we force-reconnect ───────────────
+// Binance sends kline updates at least every few seconds for liquid pairs.
+// If 15 s pass with no message, the connection is silently dead → reconnect.
+const STALE_THRESHOLD_MS = 15_000;
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ChartComponent({
   asset,
@@ -119,6 +126,7 @@ export default function ChartComponent({
   timeframe,
   onTimeframeChange,
   showFullDashboardButton = false,
+  onPriceUpdate,
 }: ChartComponentProps) {
   const containerRef  = useRef<HTMLDivElement | null>(null);
   const chartRef      = useRef<IChartApi | null>(null);
@@ -141,20 +149,12 @@ export default function ChartComponent({
   const [sigLoading,   setSigLoading]   = useState(false);
 
   // ── Detect user's browser timezone (TradingView behavior) ─────────────────
-  // Resolved ONCE on mount — same technique TradingView uses to auto-select
-  // the correct timezone for every visitor regardless of their country.
-  // Indian users see IST (UTC+5:30), US users see their local time, etc.
   const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   // ── Create chart (once) ────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Format a Unix timestamp (seconds) in the user's detected local timezone.
-    // This mirrors TradingView's auto-timezone detection exactly:
-    //   - Indian visitor     → "2026-05-14 23:39" (IST, UTC+5:30)
-    //   - US/Pacific visitor → "2026-05-14 10:09" (PDT, UTC-7)
-    //   - UK visitor         → "2026-05-14 17:09" (BST, UTC+1)
     const formatTimeLocal = (unixSec: number): string => {
       return new Intl.DateTimeFormat(undefined, {
         year:     '2-digit',
@@ -188,9 +188,6 @@ export default function ChartComponent({
         scaleMargins: { top: 0.08, bottom: 0.08 },
       },
       localization: {
-        // Dynamic timezone — same as TradingView's auto-detect behavior.
-        // Shows times in the user's local timezone: IST for India, PST/PDT for
-        // California, GMT/BST for UK, etc. Changes automatically based on browser.
         timeFormatter: formatTimeLocal,
       },
       timeScale: {
@@ -207,12 +204,11 @@ export default function ChartComponent({
       watermark: { visible:false },
     });
 
-    // Per-asset price precision — matches TradingView display
     const ASSET_PRICE_FMT: Record<string, {precision: number; minMove: number}> = {
-      'BTCUSD':  { precision: 2, minMove: 0.01 },   // $80,396.00
-      'ETHUSD':  { precision: 2, minMove: 0.01 },   // $2,316.30
-      'XAUUSD':  { precision: 2, minMove: 0.01 },   // $4,733.63
-      'LTCUSD':  { precision: 2, minMove: 0.01 },   // $58.01
+      'BTCUSD':  { precision: 2, minMove: 0.01 },
+      'ETHUSD':  { precision: 2, minMove: 0.01 },
+      'XAUUSD':  { precision: 2, minMove: 0.01 },
+      'LTCUSD':  { precision: 2, minMove: 0.01 },
     };
     const priceFmt = ASSET_PRICE_FMT[asset] ?? { precision: 2, minMove: 0.01 };
 
@@ -255,28 +251,21 @@ export default function ChartComponent({
   useEffect(() => {
     setLastPrice(null);
     setSignalStatus(null);
-    setSigLoading(true); // Show loading immediately to hide label repositioning
-    chartStartTimeRef.current = 0; // Reset until new candles load
+    setSigLoading(true);
+    chartStartTimeRef.current = 0;
 
-    // On asset/timeframe switch: always start with a clean marker slate.
-    // This prevents labels from jumping between candles when switching assets.
     const cacheKey = `${asset}:${timeframe}`;
-    // Create fresh map for this key — never show stale markers from previous load
     markerCacheRef.current.set(cacheKey, new Map());
     markersRef.current = markerCacheRef.current.get(cacheKey)!;
 
-    // Clear chart data and markers immediately
     seriesRef.current?.setData([]);
     seriesRef.current?.setMarkers([]);
 
-    // candle map: candleStartTime(seconds) → CandleDataPoint
     const candles: Map<number, CandleDataPoint> = new Map();
 
-    // ── Flush persistent marker store to chart (sorted + deduped) ────────────
     const flushMarkers = (minTime: number = chartStartTimeRef.current) => {
       if (!seriesRef.current) return;
       const all = [...markersRef.current.values()];
-      // Always filter: only show signals within the visible chart window
       const inWindow = minTime > 0
         ? all.filter(m => (m.time as number) >= minTime)
         : all;
@@ -284,8 +273,6 @@ export default function ChartComponent({
       try { seriesRef.current.setMarkers(sorted); } catch { /* ignore */ }
     };
 
-    // Messages that arrive BEFORE historical load finishes are buffered here
-    // so we never miss a candle
     const preloadBuffer: KlinePayload[] = [];
     let historyLoaded = false;
 
@@ -293,15 +280,21 @@ export default function ChartComponent({
     let socket: WebSocket | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // ── Apply a single kline payload to the candle map + chart ─────────────
-    // Handles all 3 cases identical to TradingView's internal logic:
-    //   1. Full OHLCV from any candle (closed or open) → use exactly as-is
-    //   2. Partial OHLCV — open is 0 but existing candle exists → merge with preserved open
-    //   3. Tick-only (close/price only) → update running candle's close/high/low
-    //
-    // CRITICAL: The candle's OPEN price is NEVER changed after the candle starts.
-    // This is the TradingView rule — open is fixed at the first trade of the period.
-    // Changing open mid-candle is what causes the color flip (green↔red) bug.
+    // ── Stale-data watchdog ───────────────────────────────────────────────────
+    // If no message arrives within STALE_THRESHOLD_MS, the WS is silently dead.
+    // Force-close it so onclose triggers and the reconnect loop kicks in.
+    let staleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const resetStaleTimer = () => {
+      if (staleTimer) clearTimeout(staleTimer);
+      staleTimer = setTimeout(() => {
+        if (!gone.current && socket && socket.readyState === WebSocket.OPEN) {
+          console.warn(`⚠️ Stale WS detected for ${asset} ${timeframe} — forcing reconnect`);
+          socket.close(4000, 'stale');
+        }
+      }, STALE_THRESHOLD_MS);
+    };
+
     const applyKline = (p: KlinePayload) => {
       const ts    = toUnix(p.timestamp ?? p.time);
       const close = toFloat(p.close ?? p.price);
@@ -315,37 +308,27 @@ export default function ChartComponent({
       const low   = toFloat(p.low,   0);
 
       const interval = TF_SEC[timeframe];
-      // Snap to candle boundary — identical to TradingView's bar alignment
       const start    = Math.floor(ts / interval) * interval;
       const existing = candles.get(start);
 
       let candle: CandleDataPoint;
 
-      // hasFullOHLC: backend sends real OHLCV from Binance stream.
-      // Only trust open > 0 AND high >= low (valid range).
       const hasFullOHLC = open > 0 && high > 0 && low > 0 && high >= low;
 
       if (hasFullOHLC) {
         if (existing) {
-          // Update the running candle — PRESERVE the original open price.
-          // TradingView NEVER changes a candle's open mid-period; changing it
-          // flips the candle color (green↔red). Use the FIRST open we ever saw.
           candle = {
             time:  start as Time,
-            open:  existing.open,   // ← ALWAYS keep the original open
+            open:  existing.open,   // NEVER change the original open
             high:  Math.max(existing.high, high),
             low:   Math.min(existing.low,  low),
             close,
           };
         } else {
-          // New candle period — this is the very first update for this bar.
-          // Trust the server's open value completely.
           candle = { time: start as Time, open, high, low, close };
         }
         candles.set(start, candle);
       } else if (existing) {
-        // Case 3: Only close price available — update the running candle.
-        // This happens during REST fallback or tick-only feeds.
         candle = {
           ...existing,
           close,
@@ -354,8 +337,6 @@ export default function ChartComponent({
         };
         candles.set(start, candle);
       } else {
-        // Case 3b: No existing candle — initialise from close price.
-        // Use last known close as open (correct TradingView behavior for gap candles).
         const sortedKeys = [...candles.keys()].sort((a, b) => a - b);
         const lastKey    = sortedKeys.length > 0 ? sortedKeys[sortedKeys.length - 1] : null;
         const prevClose  = lastKey !== null ? (candles.get(lastKey)?.close ?? close) : close;
@@ -364,21 +345,25 @@ export default function ChartComponent({
       }
 
       console.log('📊 Chart update:', { time: start, close, hasFullOHLC });
+
+      // Update chart price display
       setLastPrice(close);
+
+      // ── KEY FIX: notify parent so the watchlist shows the SAME price ──────
+      // This is the single source of truth for the selected asset's live price.
+      onPriceUpdate?.(asset, close);
+
       try { seriesRef.current?.update(candle); } catch (e) { console.error('Chart update failed:', e); }
     };
 
-    // ── WebSocket — open IMMEDIATELY so we never miss a live candle ───────
-    // Heartbeat mechanism to keep connection alive
-    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    // ── WebSocket reconnection — no cap, retries forever ─────────────────────
+    // FIXED: removed MAX_RECONNECT_ATTEMPTS limit that previously caused the
+    // WebSocket to silently stop reconnecting after 10 attempts, leaving the
+    // chart frozen until the user manually refreshed the page.
     let reconnectAttempts = 0;
-    const MAX_RECONNECT_ATTEMPTS = 10;
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
-    // ── Helper: convert a zone object → SeriesMarker ────────────────────────────
     const zoneToMarker = (z: { is_bullish: boolean; timestamp: string }, interval: number): SeriesMarker<Time> => {
-      // Force UTC interpretation — append Z if no timezone info present.
-      // Without this, browsers in IST (UTC+5:30) shift timestamps 5.5h earlier,
-      // placing signals on wrong candles.
       const ts = z.timestamp.includes('+') || z.timestamp.endsWith('Z')
         ? z.timestamp
         : z.timestamp + 'Z';
@@ -394,9 +379,7 @@ export default function ChartComponent({
       };
     };
 
-    // ── Merge an array of markers into markersRef and flush ───────────────────
-    // Enforces BOTH 1-hour minimum gap AND strict BUY→SELL→BUY alternation.
-    const SIXTY_MIN_S = 60 * 60; // 3600 seconds
+    const SIXTY_MIN_S = 60 * 60;
 
     const mergeAndFlush = (newMarkers: SeriesMarker<Time>[]) => {
       const sorted = [...newMarkers].sort((a, b) => (a.time as number) - (b.time as number));
@@ -404,10 +387,8 @@ export default function ChartComponent({
       for (const m of sorted) {
         const newTime = m.time as number;
 
-        // Skip exact duplicate timestamp
         if (markersRef.current.has(newTime)) continue;
 
-        // Get the last accepted marker by time
         const existingTimes = [...markersRef.current.keys()].sort((a, b) => a - b);
         const lastTime   = existingTimes.length > 0 ? existingTimes[existingTimes.length - 1] : undefined;
         const lastMarker = lastTime !== undefined ? markersRef.current.get(lastTime) : undefined;
@@ -415,17 +396,14 @@ export default function ChartComponent({
         if (lastMarker !== undefined && lastTime !== undefined) {
           const gapSeconds = newTime - lastTime;
 
-          // ── Gap < 1 hour: handle without adding new entry ──────────────
           if (gapSeconds < SIXTY_MIN_S) {
-            // Only replace if same type AND newer (keeps most recent)
             if (lastMarker.text === m.text && newTime > lastTime) {
               markersRef.current.delete(lastTime);
               markersRef.current.set(newTime, m);
             }
-            continue; // Never add a new entry within 1 hour of last
+            continue;
           }
 
-          // ── Gap >= 1 hour but same type: replace last ──────────────────
           if (lastMarker.text === m.text) {
             if (newTime > lastTime) {
               markersRef.current.delete(lastTime);
@@ -435,8 +413,6 @@ export default function ChartComponent({
           }
         }
 
-        // Gap >= 1 hour AND different type (or first signal) — accept
-        // Only add if within chart window
         if (chartStartTimeRef.current === 0 || newTime >= chartStartTimeRef.current) {
           markersRef.current.set(newTime, m);
         }
@@ -445,19 +421,14 @@ export default function ChartComponent({
       flushMarkers();
     };
 
-    // ── Apply a live signal broadcast from backend ────────────────────────────
-    // Backend now broadcasts only the single latest new signal in all_zones.
-    // We use zoneToMarker (UTC-safe) and mergeAndFlush (1h gap + alternation).
     const applySignal = (s: SignalPayload) => {
       if (!seriesRef.current) return;
       const interval = TF_SEC[timeframe];
 
-      // Convert all_zones to markers using UTC-safe zoneToMarker
       const newMarkers: SeriesMarker<Time>[] = s.all_zones.map(
         (z) => zoneToMarker(z, interval)
       );
 
-      // Only merge if within the chart window — prevents out-of-window signals
       const chartStart = chartStartTimeRef.current;
       const inWindow = chartStart > 0
         ? newMarkers.filter(m => (m.time as number) >= chartStart)
@@ -471,65 +442,62 @@ export default function ChartComponent({
 
     const connect = () => {
       if (gone.current) return;
-      
-      // Clear any existing heartbeat
-      if (heartbeatTimer) {
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
+
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+      if (staleTimer) { clearTimeout(staleTimer); staleTimer = null; }
 
       try {
         socket = new WebSocket(`${wsBaseUrl}/ws/market/${asset}/${timeframe}/`);
 
-        socket.onerror = (error) => {
-          console.error('Chart WebSocket error:', error);
+        socket.onerror = () => {
+          console.error(`Chart WebSocket error: ${asset} ${timeframe}`);
           setConnected(false);
         };
-        
+
         socket.onopen = () => {
           console.log(`✅ WebSocket connected: ${asset} ${timeframe}`);
           setConnected(true);
-          reconnectAttempts = 0; // Reset on successful connection
-          
-          // Start heartbeat - send ping every 30 seconds to keep connection alive
+          reconnectAttempts = 0;
+
+          // Start stale-data watchdog immediately
+          resetStaleTimer();
+
+          // Heartbeat — keeps the TCP connection alive through proxies/load-balancers
           heartbeatTimer = setInterval(() => {
             if (socket && socket.readyState === WebSocket.OPEN) {
-              try {
-                socket.send(JSON.stringify({ action: 'ping' }));
-              } catch (e) {
-                console.error('Heartbeat ping failed:', e);
-              }
+              try { socket.send(JSON.stringify({ action: 'ping' })); } catch { /* ignore */ }
             }
-          }, 30000); // 30 seconds
+          }, 20_000); // every 20 s
         };
-        
+
         socket.onclose = (event) => {
           console.warn(`WebSocket closed: ${asset} ${timeframe} (code: ${event.code})`);
           setConnected(false);
-          
-          // Clear heartbeat
-          if (heartbeatTimer) {
-            clearInterval(heartbeatTimer);
-            heartbeatTimer = null;
-          }
-          
-          // Exponential backoff reconnection
-          if (!gone.current && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+
+          if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+          if (staleTimer) { clearTimeout(staleTimer); staleTimer = null; }
+
+          if (!gone.current) {
+            // ── No cap on reconnect attempts — retries forever ────────────────
+            // Previously capped at 10 attempts, which caused the chart to freeze
+            // permanently after 10 reconnect failures. Now it always retries.
             reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Max 30s
-            console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+            // Exponential backoff: 1s → 2s → 4s → … capped at 10s (not 30s)
+            // Shorter cap means data resumes faster after a brief network hiccup.
+            const delay = Math.min(1000 * Math.pow(2, Math.min(reconnectAttempts - 1, 4)), 10_000);
+            console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})…`);
             retryTimer = setTimeout(connect, delay);
-          } else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            console.error('Max reconnection attempts reached. Please refresh the page.');
           }
         };
 
         socket.onmessage = (ev: MessageEvent<string>) => {
+          // Every message means the connection is alive — reset stale watchdog
+          resetStaleTimer();
+
           try {
             const raw = JSON.parse(ev.data) as Record<string, unknown>;
             const msgType = raw.type as string | undefined;
-            
-            // Debug: Log ALL messages with their type and key fields
+
             console.log('📨 WS MSG:', {
               type: msgType || 'kline',
               asset: raw.asset,
@@ -537,28 +505,25 @@ export default function ChartComponent({
               timestamp: raw.timestamp || raw.time,
               hasOHLC: !!(raw.open && raw.high && raw.low && raw.close)
             });
-            
-            if (msgType === 'ping') { 
-              socket?.send(JSON.stringify({ action:'pong' })); 
-              return; 
+
+            if (msgType === 'ping') {
+              socket?.send(JSON.stringify({ action:'pong' }));
+              return;
             }
 
-            // Live signal from backend _emit_live_signal — apply markers immediately
             if (msgType === 'signal') {
               console.log('🎯 SIGNAL received:', raw);
               if (historyLoaded) applySignal(raw as unknown as SignalPayload);
               return;
             }
 
-            // Regular kline update (no type field) — this is the price data
             const p = raw as unknown as KlinePayload;
             if (!historyLoaded) {
-              // Queue the message — will be replayed after history is set
               preloadBuffer.push(p);
             } else {
               applyKline(p);
             }
-          } catch (err) { 
+          } catch (err) {
             console.error('❌ WebSocket parse error:', err);
           }
         };
@@ -568,7 +533,6 @@ export default function ChartComponent({
       }
     };
 
-    // Start WebSocket right away — before we even fetch history
     connect();
 
     const fetchSignals = async (chartStartTime: number = 0) => {
@@ -576,19 +540,13 @@ export default function ChartComponent({
       setSigLoading(true);
       const interval = TF_SEC[timeframe];
 
-      // Always start with a clean slate — clears both active store and cache
       markersRef.current.clear();
       const cacheKey = `${asset}:${timeframe}`;
       markerCacheRef.current.delete(cacheKey);
 
       try {
-        // ── Collect ALL signals from BOTH sources into one array ──────────────
-        // Then do a SINGLE sorted alternation-enforcing pass.
-        // This is the correct approach — two separate mergeAndFlush calls
-        // with overlapping data caused the consecutive BUY/SELL bug.
         const allRawSignals: Array<{is_bullish: boolean; timestamp: string}> = [];
 
-        // Source 1: DB history (permanently stored, 30-day window)
         try {
           const dbRes = await fetch(`/api/trading/signal-history/${asset}/?timeframe=${timeframe}`);
           if (dbRes.ok && !gone.current) {
@@ -603,7 +561,6 @@ export default function ChartComponent({
 
         if (gone.current) return;
 
-        // Source 2: Live calculator signals (current 1000-candle window)
         let liveStatus: {last_signal: string; tracking: string} | null = null;
         try {
           const liveRes = await fetch(`/api/trading/reversal-zones/${asset}/?timeframe=${timeframe}`);
@@ -620,68 +577,49 @@ export default function ChartComponent({
 
         if (gone.current) return;
 
-        // ── Convert ALL signals to markers and sort by time ───────────────────
         const allMarkers = allRawSignals
           .map(z => zoneToMarker(z, interval))
           .sort((a, b) => (a.time as number) - (b.time as number));
 
-        // ── Single pass: enforce BOTH 1-hour gap AND alternation ─────────────
-        // Rules (applied in order to each candidate signal):
-        //   1. Skip exact duplicate timestamp
-        //   2. Must be >= 1 hour after the last ACCEPTED signal
-        //   3. Must be different type (BUY vs SELL) from the last ACCEPTED signal
-        //      If same type AND newer → replace last (keep most recent of same type)
-        const SIXTY_MIN = 60 * 60; // 3600 seconds — 1 hour minimum gap
+        const SIXTY_MIN = 60 * 60;
         const finalMarkers: SeriesMarker<Time>[] = [];
         const seenTimes = new Set<number>();
 
         for (const m of allMarkers) {
           const t = m.time as number;
 
-          // Rule 1: Skip exact duplicate timestamps
           if (seenTimes.has(t)) continue;
 
           const last = finalMarkers.length > 0 ? finalMarkers[finalMarkers.length - 1] : undefined;
           const lastTime = last !== undefined ? (last.time as number) : undefined;
 
-          // Rule 2: Must be at least 60 minutes after last accepted signal
           if (lastTime !== undefined) {
-            const gapSeconds = t - lastTime; // positive = newer
+            const gapSeconds = t - lastTime;
             if (gapSeconds < SIXTY_MIN) {
-              // Too close: if same type keep newer (replace), if different type skip
               if (last !== undefined && last.text === m.text && t > lastTime) {
-                // Replace last with this more recent same-type signal
                 finalMarkers[finalMarkers.length - 1] = m;
                 seenTimes.delete(lastTime);
                 seenTimes.add(t);
               }
-              // Either way, do not add as a new entry — gap is too small
               continue;
             }
           }
 
-          // Rule 3: Must alternate (BUY→SELL→BUY)
           if (last !== undefined && last.text === m.text) {
-            // Same type but >= 1 hour apart — keep the MORE RECENT one
             finalMarkers[finalMarkers.length - 1] = m;
             seenTimes.delete(last.time as number);
             seenTimes.add(t);
             continue;
           }
 
-          // Passed all checks — accept this signal
           finalMarkers.push(m);
           seenTimes.add(t);
         }
 
-        // ── Filter out signals BEFORE the chart's oldest visible candle ────────
-        // This prevents out-of-window signals clustering on the first candle.
-        // chartStartTime is passed directly from loadHistory — no ref timing issue.
         const inWindowMarkers = chartStartTime > 0
           ? finalMarkers.filter(m => (m.time as number) >= chartStartTime)
           : finalMarkers;
 
-        // ── Apply to chart — single setMarkers call, no race conditions ───────
         for (const m of inWindowMarkers) {
           markersRef.current.set(m.time as number, m);
         }
@@ -695,14 +633,8 @@ export default function ChartComponent({
       finally { if (!gone.current) setSigLoading(false); }
     };
 
-    // ── Fetch Binance REST historical OHLCV ───────────────────────────────
     const loadHistory = async () => {
       try {
-        // PAXG special case: XAUUSD uses paxgusdt on Binance (gold-backed token)
-        // Asset → Binance symbol mapping.
-        // NOTE: We use Binance.com (global exchange) here — the SAME data source
-        // as TradingView — so candle colors (green/red) match exactly.
-        // The backend WebSocket also uses Binance.com for perfect consistency.
         const ASSET_TO_BINANCE: Record<string, string> = {
           'XAUUSD': 'PAXGUSDT',
           'BTCUSD': 'BTCUSDT',
@@ -720,16 +652,12 @@ export default function ChartComponent({
           '1d':  180,
         };
         const limit = TF_LIMIT[timeframe] ?? 1000;
-        // Binance.com (global) — same data source as TradingView for accurate candle colors.
-        // Both historical REST and live WS data now come from the same exchange as TradingView,
-        // so open prices at candle boundaries always match perfectly.
         const res = await fetch(
           `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${TF_BINANCE[timeframe]}&limit=${limit}`
         );
         const raw = await res.json();
         if (gone.current) return;
 
-        // Parse into candle array
         let hist: CandleDataPoint[] = raw.map((k: (string|number)[]) => ({
           time:  Math.floor(Number(k[0]) / 1000) as Time,
           open:  parseFloat(k[1] as string),
@@ -738,33 +666,29 @@ export default function ChartComponent({
           close: parseFloat(k[4] as string),
         }));
 
-        // Populate candle map
         for (const c of hist) candles.set(c.time as number, c);
 
-        // Render history on chart
         seriesRef.current?.setData(hist);
         chartRef.current?.timeScale().fitContent();
 
         if (hist.length > 0) {
-          setLastPrice(hist[hist.length - 1].close);
-          // Record oldest candle time — signals before this are OUT OF WINDOW
-          // and must be filtered to prevent clustering on the first candle
+          const latestClose = hist[hist.length - 1].close;
+          setLastPrice(latestClose);
+
+          // Immediately sync the watchlist price to match chart on load
+          onPriceUpdate?.(asset, latestClose);
+
           chartStartTimeRef.current = hist[0].time as number;
         }
 
-        // Replay any WebSocket messages that arrived during the fetch
         historyLoaded = true;
         for (const p of preloadBuffer) applyKline(p);
         preloadBuffer.length = 0;
 
-        // Flush any already-cached markers (from previous visit in this session)
-        // This makes switching back to a timeframe instant — no API wait needed
         if (markersRef.current.size > 0) {
           flushMarkers();
         }
 
-        // Fetch full signal history from DB + live calculator
-        // Pass chartStartTime directly so filter is guaranteed to work
         const chartStartTime = hist.length > 0 ? (hist[0].time as number) : 0;
         await fetchSignals(chartStartTime);
 
@@ -777,9 +701,8 @@ export default function ChartComponent({
       gone.current = true;
       if (retryTimer) clearTimeout(retryTimer);
       if (heartbeatTimer) clearInterval(heartbeatTimer);
+      if (staleTimer) clearTimeout(staleTimer);
       socket?.close();
-      // Do NOT call setMarkers([]) here — it would wipe the chart markers
-      // before the new timeframe's flushMarkers() runs, causing a blank flash
     };
   }, [asset, wsBaseUrl, timeframe]);
 
@@ -810,7 +733,7 @@ export default function ChartComponent({
             </span>
           </div>
 
-          {/* Dynamic timezone badge — exactly like TradingView shows "UTC+5:30" etc. */}
+          {/* Dynamic timezone badge */}
           <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm" title="Chart times are displayed in your local timezone">
             <span className="text-slate-400">TZ: </span>
             <span className="font-medium text-cyan-300">
@@ -883,7 +806,6 @@ export default function ChartComponent({
 
       {/* Chart */}
       <div className="relative h-[600px]">
-        {/* Loading overlay - hides label repositioning */}
         {sigLoading && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
             <div className="text-center">

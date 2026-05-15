@@ -305,7 +305,10 @@ export default function ChartComponent({
     const applyKline = (p: KlinePayload) => {
       const ts    = toUnix(p.timestamp ?? p.time);
       const close = toFloat(p.close ?? p.price);
-      if (!close || !Number.isFinite(close)) return;
+      if (!close || !Number.isFinite(close)) {
+        console.warn('⚠️ Invalid close price:', p);
+        return;
+      }
 
       const open  = toFloat(p.open,  0);
       const high  = toFloat(p.high,  0);
@@ -360,8 +363,9 @@ export default function ChartComponent({
         candles.set(start, candle);
       }
 
+      console.log('📊 Chart update:', { time: start, close, hasFullOHLC });
       setLastPrice(close);
-      try { seriesRef.current?.update(candle); } catch { /* ignore */ }
+      try { seriesRef.current?.update(candle); } catch (e) { console.error('Chart update failed:', e); }
     };
 
     // ── WebSocket — open IMMEDIATELY so we never miss a live candle ───────
@@ -524,26 +528,38 @@ export default function ChartComponent({
           try {
             const raw = JSON.parse(ev.data) as Record<string, unknown>;
             const msgType = raw.type as string | undefined;
-            const p = raw as unknown as KlinePayload;
             
-            console.log('📨 WebSocket message received:', msgType, p);
+            // Debug: Log ALL messages with their type and key fields
+            console.log('📨 WS MSG:', {
+              type: msgType || 'kline',
+              asset: raw.asset,
+              close: raw.close || raw.price,
+              timestamp: raw.timestamp || raw.time,
+              hasOHLC: !!(raw.open && raw.high && raw.low && raw.close)
+            });
             
-            if (msgType === 'ping') { socket?.send(JSON.stringify({ action:'pong' })); return; }
+            if (msgType === 'ping') { 
+              socket?.send(JSON.stringify({ action:'pong' })); 
+              return; 
+            }
 
             // Live signal from backend _emit_live_signal — apply markers immediately
             if (msgType === 'signal') {
+              console.log('🎯 SIGNAL received:', raw);
               if (historyLoaded) applySignal(raw as unknown as SignalPayload);
               return;
             }
 
+            // Regular kline update (no type field) — this is the price data
+            const p = raw as unknown as KlinePayload;
             if (!historyLoaded) {
               // Queue the message — will be replayed after history is set
-              preloadBuffer.push(p as KlinePayload);
+              preloadBuffer.push(p);
             } else {
-              applyKline(p as KlinePayload);
+              applyKline(p);
             }
           } catch (err) { 
-            console.error('WebSocket message parse error:', err);
+            console.error('❌ WebSocket parse error:', err);
           }
         };
       } catch (e) {

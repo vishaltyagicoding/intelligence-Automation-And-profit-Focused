@@ -525,6 +525,9 @@ export default function ChartComponent({
             const raw = JSON.parse(ev.data) as Record<string, unknown>;
             const msgType = raw.type as string | undefined;
             const p = raw as unknown as KlinePayload;
+            
+            console.log('📨 WebSocket message received:', msgType, p);
+            
             if (msgType === 'ping') { socket?.send(JSON.stringify({ action:'pong' })); return; }
 
             // Live signal from backend _emit_live_signal — apply markers immediately
@@ -539,7 +542,9 @@ export default function ChartComponent({
             } else {
               applyKline(p as KlinePayload);
             }
-          } catch { /* ignore */ }
+          } catch (err) { 
+            console.error('WebSocket message parse error:', err);
+          }
         };
       } catch (e) {
         console.error('Failed to create WebSocket:', e);

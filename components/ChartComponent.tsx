@@ -365,21 +365,65 @@ export default function ChartComponent({
     };
 
     // ── WebSocket — open IMMEDIATELY so we never miss a live candle ───────
+    // Heartbeat mechanism to keep connection alive
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 10;
+
     const connect = () => {
       if (gone.current) return;
-      socket = new WebSocket(`${wsBaseUrl}/ws/market/${asset}/${timeframe}/`);
+      
+      // Clear any existing heartbeat
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
 
-      socket.onerror = (error) => {
-        console.error('Chart WebSocket error:', error);
-        setConnected(false);
-      };
-      
-      socket.onopen  = () => setConnected(true);
-      
-      socket.onclose = () => {
-        setConnected(false);
-        if (!gone.current) retryTimer = setTimeout(connect, 3000);
-      };
+      try {
+        socket = new WebSocket(`${wsBaseUrl}/ws/market/${asset}/${timeframe}/`);
+
+        socket.onerror = (error) => {
+          console.error('Chart WebSocket error:', error);
+          setConnected(false);
+        };
+        
+        socket.onopen = () => {
+          console.log(`✅ WebSocket connected: ${asset} ${timeframe}`);
+          setConnected(true);
+          reconnectAttempts = 0; // Reset on successful connection
+          
+          // Start heartbeat - send ping every 30 seconds to keep connection alive
+          heartbeatTimer = setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              try {
+                socket.send(JSON.stringify({ action: 'ping' }));
+              } catch (e) {
+                console.error('Heartbeat ping failed:', e);
+              }
+            }
+          }, 30000); // 30 seconds
+        };
+        
+        socket.onclose = (event) => {
+          console.warn(`WebSocket closed: ${asset} ${timeframe} (code: ${event.code})`);
+          setConnected(false);
+          
+          // Clear heartbeat
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+          }
+          
+          // Exponential backoff reconnection
+          if (!gone.current && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Max 30s
+            console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+            retryTimer = setTimeout(connect, delay);
+          } else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            console.error('Max reconnection attempts reached. Please refresh the page.');
+          }
+        };
 
 
     // ── Apply a live signal broadcast from backend ────────────────────────────
@@ -709,6 +753,7 @@ export default function ChartComponent({
     return () => {
       gone.current = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       socket?.close();
       // Do NOT call setMarkers([]) here — it would wipe the chart markers
       // before the new timeframe's flushMarkers() runs, causing a blank flash

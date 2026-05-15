@@ -74,10 +74,12 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         self.binance_client = None
         self.bsm = None
         self.stream_task = None
+        self.ping_task = None  # Server-side ping task
         self.asset = None
         self.binance_symbol = None
         self.timeframe = "1m"  # Default timeframe
         self.binance_interval = "1m"  # Binance API interval
+        self.last_pong_time = None  # Track last pong from client
 
     async def connect(self):
         """Accept only supported watchlist assets and timeframes."""
@@ -109,11 +111,18 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
 
         await self.channel_layer.group_add(f"market_{self.asset}_{self.timeframe}", self.channel_name)
         await self.start_binance_stream()
+        
+        # Start server-side ping task to detect dead connections
+        self.last_pong_time = asyncio.get_event_loop().time()
+        self.ping_task = asyncio.create_task(self.send_periodic_pings())
 
         logger.info("Market WebSocket connected for %s at %s timeframe", self.asset, self.timeframe)
 
     async def disconnect(self, close_code):
         """Clean up stream, redis, and group membership."""
+        if self.ping_task:
+            self.ping_task.cancel()
+            
         if self.stream_task:
             self.stream_task.cancel()
 
@@ -147,6 +156,7 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                 await self.unsubscribe_symbol()
             elif action == "pong":
                 # Client responded to ping, connection is alive
+                self.last_pong_time = asyncio.get_event_loop().time()
                 logger.debug("Received pong from client for %s", self.asset)
         except Exception as exc:
             logger.error("Error processing market socket message: %s", exc)
@@ -172,6 +182,33 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                 await asyncio.sleep(2 ** retry_count)
 
         logger.error("Failed to start Binance stream for %s after %d attempts", self.asset, max_retries)
+
+    async def send_periodic_pings(self):
+        """Send ping to client every 30 seconds to keep connection alive and detect dead connections."""
+        try:
+            while True:
+                await asyncio.sleep(30)  # Ping every 30 seconds
+                
+                # Check if client is still responding
+                current_time = asyncio.get_event_loop().time()
+                if self.last_pong_time and (current_time - self.last_pong_time) > 90:
+                    # No pong received for 90 seconds (3 missed pings) - close connection
+                    logger.warning("Client %s not responding to pings, closing connection", self.asset)
+                    await self.close(code=1000)
+                    return
+                
+                # Send ping
+                try:
+                    await self.send(text_data=json.dumps({"type": "ping"}))
+                    logger.debug("Sent ping to client for %s", self.asset)
+                except Exception as e:
+                    logger.error("Failed to send ping to client %s: %s", self.asset, e)
+                    await self.close(code=1000)
+                    return
+        except asyncio.CancelledError:
+            logger.debug("Ping task cancelled for %s", self.asset)
+        except Exception as exc:
+            logger.error("Error in ping task for %s: %s", self.asset, exc)
 
     async def stream_binance_data(self):
         """

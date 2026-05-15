@@ -370,114 +370,7 @@ export default function ChartComponent({
     let reconnectAttempts = 0;
     const MAX_RECONNECT_ATTEMPTS = 10;
 
-    const connect = () => {
-      if (gone.current) return;
-      
-      // Clear any existing heartbeat
-      if (heartbeatTimer) {
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
-
-      try {
-        socket = new WebSocket(`${wsBaseUrl}/ws/market/${asset}/${timeframe}/`);
-
-        socket.onerror = (error) => {
-          console.error('Chart WebSocket error:', error);
-          setConnected(false);
-        };
-        
-        socket.onopen = () => {
-          console.log(`✅ WebSocket connected: ${asset} ${timeframe}`);
-          setConnected(true);
-          reconnectAttempts = 0; // Reset on successful connection
-          
-          // Start heartbeat - send ping every 30 seconds to keep connection alive
-          heartbeatTimer = setInterval(() => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              try {
-                socket.send(JSON.stringify({ action: 'ping' }));
-              } catch (e) {
-                console.error('Heartbeat ping failed:', e);
-              }
-            }
-          }, 30000); // 30 seconds
-        };
-        
-        socket.onclose = (event) => {
-          console.warn(`WebSocket closed: ${asset} ${timeframe} (code: ${event.code})`);
-          setConnected(false);
-          
-          // Clear heartbeat
-          if (heartbeatTimer) {
-            clearInterval(heartbeatTimer);
-            heartbeatTimer = null;
-          }
-          
-          // Exponential backoff reconnection
-          if (!gone.current && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            reconnectAttempts++;
-            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Max 30s
-            console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-            retryTimer = setTimeout(connect, delay);
-          } else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            console.error('Max reconnection attempts reached. Please refresh the page.');
-          }
-        };
-
-
-    // ── Apply a live signal broadcast from backend ────────────────────────────
-    // Backend now broadcasts only the single latest new signal in all_zones.
-    // We use zoneToMarker (UTC-safe) and mergeAndFlush (1h gap + alternation).
-    const applySignal = (s: SignalPayload) => {
-      if (!seriesRef.current) return;
-      const interval = TF_SEC[timeframe];
-
-      // Convert all_zones to markers using UTC-safe zoneToMarker
-      const newMarkers: SeriesMarker<Time>[] = s.all_zones.map(
-        (z) => zoneToMarker(z, interval)
-      );
-
-      // Only merge if within the chart window — prevents out-of-window signals
-      const chartStart = chartStartTimeRef.current;
-      const inWindow = chartStart > 0
-        ? newMarkers.filter(m => (m.time as number) >= chartStart)
-        : newMarkers;
-
-      if (inWindow.length > 0) {
-        mergeAndFlush(inWindow);
-        setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
-      }
-    };
-
-      socket.onmessage = (ev: MessageEvent<string>) => {
-        try {
-          const raw = JSON.parse(ev.data) as Record<string, unknown>;
-          const msgType = raw.type as string | undefined;
-          const p = raw as unknown as KlinePayload;
-          if (msgType === 'ping') { socket?.send(JSON.stringify({ action:'pong' })); return; }
-
-          // Live signal from backend _emit_live_signal — apply markers immediately
-          if (msgType === 'signal') {
-            if (historyLoaded) applySignal(raw as unknown as SignalPayload);
-            return;
-          }
-
-          if (!historyLoaded) {
-            // Queue the message — will be replayed after history is set
-            preloadBuffer.push(p as KlinePayload);
-          } else {
-            applyKline(p as KlinePayload);
-          }
-        } catch { /* ignore */ }
-      };
-    };
-
-    // Start WebSocket right away — before we even fetch history
-    connect();
-
-    // ── Fetch BUY/SELL reversal signals ───────────────────────────────────
-    // ── Helper: convert a zone object → SeriesMarker ────────────────────────
+    // ── Helper: convert a zone object → SeriesMarker ────────────────────────────
     const zoneToMarker = (z: { is_bullish: boolean; timestamp: string }, interval: number): SeriesMarker<Time> => {
       // Force UTC interpretation — append Z if no timezone info present.
       // Without this, browsers in IST (UTC+5:30) shift timestamps 5.5h earlier,
@@ -547,6 +440,115 @@ export default function ChartComponent({
 
       flushMarkers();
     };
+
+    // ── Apply a live signal broadcast from backend ────────────────────────────
+    // Backend now broadcasts only the single latest new signal in all_zones.
+    // We use zoneToMarker (UTC-safe) and mergeAndFlush (1h gap + alternation).
+    const applySignal = (s: SignalPayload) => {
+      if (!seriesRef.current) return;
+      const interval = TF_SEC[timeframe];
+
+      // Convert all_zones to markers using UTC-safe zoneToMarker
+      const newMarkers: SeriesMarker<Time>[] = s.all_zones.map(
+        (z) => zoneToMarker(z, interval)
+      );
+
+      // Only merge if within the chart window — prevents out-of-window signals
+      const chartStart = chartStartTimeRef.current;
+      const inWindow = chartStart > 0
+        ? newMarkers.filter(m => (m.time as number) >= chartStart)
+        : newMarkers;
+
+      if (inWindow.length > 0) {
+        mergeAndFlush(inWindow);
+        setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
+      }
+    };
+
+    const connect = () => {
+      if (gone.current) return;
+      
+      // Clear any existing heartbeat
+      if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+
+      try {
+        socket = new WebSocket(`${wsBaseUrl}/ws/market/${asset}/${timeframe}/`);
+
+        socket.onerror = (error) => {
+          console.error('Chart WebSocket error:', error);
+          setConnected(false);
+        };
+        
+        socket.onopen = () => {
+          console.log(`✅ WebSocket connected: ${asset} ${timeframe}`);
+          setConnected(true);
+          reconnectAttempts = 0; // Reset on successful connection
+          
+          // Start heartbeat - send ping every 30 seconds to keep connection alive
+          heartbeatTimer = setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              try {
+                socket.send(JSON.stringify({ action: 'ping' }));
+              } catch (e) {
+                console.error('Heartbeat ping failed:', e);
+              }
+            }
+          }, 30000); // 30 seconds
+        };
+        
+        socket.onclose = (event) => {
+          console.warn(`WebSocket closed: ${asset} ${timeframe} (code: ${event.code})`);
+          setConnected(false);
+          
+          // Clear heartbeat
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+          }
+          
+          // Exponential backoff reconnection
+          if (!gone.current && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000); // Max 30s
+            console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+            retryTimer = setTimeout(connect, delay);
+          } else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            console.error('Max reconnection attempts reached. Please refresh the page.');
+          }
+        };
+
+        socket.onmessage = (ev: MessageEvent<string>) => {
+          try {
+            const raw = JSON.parse(ev.data) as Record<string, unknown>;
+            const msgType = raw.type as string | undefined;
+            const p = raw as unknown as KlinePayload;
+            if (msgType === 'ping') { socket?.send(JSON.stringify({ action:'pong' })); return; }
+
+            // Live signal from backend _emit_live_signal — apply markers immediately
+            if (msgType === 'signal') {
+              if (historyLoaded) applySignal(raw as unknown as SignalPayload);
+              return;
+            }
+
+            if (!historyLoaded) {
+              // Queue the message — will be replayed after history is set
+              preloadBuffer.push(p as KlinePayload);
+            } else {
+              applyKline(p as KlinePayload);
+            }
+          } catch { /* ignore */ }
+        };
+      } catch (e) {
+        console.error('Failed to create WebSocket:', e);
+        setConnected(false);
+      }
+    };
+
+    // Start WebSocket right away — before we even fetch history
+    connect();
 
     const fetchSignals = async (chartStartTime: number = 0) => {
       if (!seriesRef.current || gone.current) return;

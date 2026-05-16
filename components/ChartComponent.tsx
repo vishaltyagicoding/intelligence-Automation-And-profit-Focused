@@ -2,13 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
-  ColorType,
-  CrosshairMode,
-  createChart,
-  type IChartApi,
-  type ISeriesApi,
-  type SeriesMarker,
-  type Time,
+  ColorType, CrosshairMode, createChart,
+  type IChartApi, type ISeriesApi, type SeriesMarker, type Time,
 } from 'lightweight-charts';
 
 export type WatchlistAsset = 'BTCUSD' | 'ETHUSD' | 'XAUUSD' | 'LTCUSD';
@@ -23,149 +18,105 @@ export interface AISignal {
   color: string;
 }
 
-interface ReversalZone {
-  bar_index: number;
-  center_price: number;
-  outer_top: number;
-  outer_bottom: number;
-  core_top: number;
-  core_bottom: number;
-  is_bullish: boolean;
-  label: string;
-  timestamp: string;
-}
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const TIMEFRAMES: Timeframe[] = ['5m', '15m', '30m', '1h', '2h', '4h', '1d'];
+
+const ASSET_TO_BINANCE: Record<WatchlistAsset, string> = {
+  BTCUSD: 'BTCUSDT', ETHUSD: 'ETHUSDT',
+  XAUUSD: 'PAXGUSDT', LTCUSD: 'LTCUSDT',
+};
+
+// Lowercase stream names for Binance WebSocket
+const ASSET_TO_BINANCE_WS: Record<WatchlistAsset, string> = {
+  BTCUSD: 'btcusdt', ETHUSD: 'ethusdt',
+  XAUUSD: 'paxgusdt', LTCUSD: 'ltcusdt',
+};
+
+const TF_BINANCE: Record<Timeframe, string> = {
+  '5m': '5m', '15m': '15m', '30m': '30m',
+  '1h': '1h', '2h': '2h', '4h': '4h', '1d': '1d',
+};
+
+const TF_SEC: Record<Timeframe, number> = {
+  '5m': 300, '15m': 900, '30m': 1800,
+  '1h': 3600, '2h': 7200, '4h': 14400, '1d': 86400,
+};
+
+const TF_LIMIT: Record<Timeframe, number> = {
+  '5m': 1000, '15m': 1000, '30m': 1000,
+  '1h': 750, '2h': 375, '4h': 200, '1d': 180,
+};
+
+const COLOR_UP   = '#26a69a';
+const COLOR_DOWN = '#ef5350';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CandleDataPoint {
-  time: Time;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
+  time: Time; open: number; high: number; low: number; close: number;
 }
 
-// Exact payload shape sent by MarketDataConsumer
-interface KlinePayload {
-  timestamp?: number;
-  time?: number;
-  open?: number | string;
-  high?: number | string;
-  low?: number | string;
-  close?: number | string;
-  price?: number | string;
-  type?: string;
-  is_closed?: boolean;
+interface SignalPayload {
+  type: 'signal';
+  asset: string; timeframe: string;
+  signal: 'BUY' | 'SELL';
+  is_bullish: boolean; price: number;
+  timestamp: string; bar_index: number; tracking: string;
+  all_zones: Array<{ is_bullish: boolean; center_price: number; timestamp: string; bar_index: number }>;
 }
 
-interface ChartComponentProps {
+// Binance kline stream message
+interface BinanceKlineMsg {
+  e: string;
+  k: {
+    t: number;   // open time ms
+    o: string; h: string; l: string; c: string;
+    x: boolean;  // is candle closed
+  };
+}
+
+export interface ChartComponentProps {
   asset: WatchlistAsset;
   aiSignals: AISignal[];
   subscriptionActive: boolean;
   wsBaseUrl: string;
   timeframe: Timeframe;
-  onTimeframeChange: (timeframe: Timeframe) => void;
+  onTimeframeChange: (tf: Timeframe) => void;
   showFullDashboardButton?: boolean;
-  /** Called every time the chart receives a new price tick — used to sync watchlist prices */
   onPriceUpdate?: (asset: WatchlistAsset, price: number) => void;
 }
 
-
-// Live signal payload from backend _emit_live_signal
-interface SignalPayload {
-  type: 'signal';
-  asset: string;
-  timeframe: string;
-  signal: 'BUY' | 'SELL';
-  is_bullish: boolean;
-  price: number;
-  timestamp: string;
-  bar_index: number;
-  tracking: string;
-  all_zones: Array<{
-    is_bullish: boolean;
-    center_price: number;
-    timestamp: string;
-    bar_index: number;
-  }>;
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-function toUnix(v?: number): number {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return Math.floor(Date.now() / 1000);
-  return v > 9_999_999_999 ? Math.floor(v / 1000) : v;
-}
-function toFloat(v: number | string | undefined, fallback = 0): number {
+function toFloat(v: string | number | undefined, fallback = 0): number {
   const n = typeof v === 'string' ? parseFloat(v) : (v ?? NaN);
   return Number.isFinite(n) ? n : fallback;
 }
 
-// ── constants ─────────────────────────────────────────────────────────────────
-const TIMEFRAMES: Timeframe[] = ['5m','15m','30m','1h','2h','4h','1d'];
+// ─── Component ────────────────────────────────────────────────────────────────
 
-const TF_BINANCE: Record<Timeframe, string> = {
-  '5m':'5m','15m':'15m','30m':'30m','1h':'1h','2h':'2h','4h':'4h','1d':'1d',
-};
-
-const TF_SEC: Record<Timeframe, number> = {
-  '5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'1d':86400,
-};
-
-// TradingView exact colors
-const COLOR_UP   = '#26a69a';   // teal  (bullish candle)
-const COLOR_DOWN = '#ef5350';   // red   (bearish candle)
-
-// ── How long (ms) with no WS message before we force-reconnect ───────────────
-// Binance sends kline updates at least every few seconds for liquid pairs.
-// If 15 s pass with no message, the connection is silently dead → reconnect.
-const STALE_THRESHOLD_MS = 15_000;
-
-// ─────────────────────────────────────────────────────────────────────────────
 export default function ChartComponent({
-  asset,
-  subscriptionActive,
-  wsBaseUrl,
-  timeframe,
-  onTimeframeChange,
-  showFullDashboardButton = false,
-  onPriceUpdate,
+  asset, subscriptionActive, wsBaseUrl,
+  timeframe, onTimeframeChange,
+  showFullDashboardButton = false, onPriceUpdate,
 }: ChartComponentProps) {
-  const containerRef  = useRef<HTMLDivElement | null>(null);
-  const chartRef      = useRef<IChartApi | null>(null);
-  const seriesRef     = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const roRef         = useRef<ResizeObserver | null>(null);
 
-  // Per-timeframe marker cache — key: "asset:timeframe", value: marker Map
-  // This survives timeframe switches so switching back restores labels instantly
-  const markerCacheRef = useRef<Map<string, Map<number, SeriesMarker<Time>>>>(new Map());
-
-  // Active marker store for the currently selected timeframe
-  const markersRef = useRef<Map<number, SeriesMarker<Time>>>(new Map());
-
-  // Oldest candle timestamp — signals before this are out-of-window and filtered
-  const chartStartTimeRef = useRef<number>(0);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef     = useRef<IChartApi | null>(null);
+  const seriesRef    = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const roRef        = useRef<ResizeObserver | null>(null);
+  const markersRef   = useRef<Map<number, SeriesMarker<Time>>>(new Map());
+  const chartStartRef = useRef<number>(0);
 
   const [lastPrice,    setLastPrice]    = useState<number | null>(null);
   const [connected,    setConnected]    = useState<boolean | null>(null);
-  const [signalStatus, setSignalStatus] = useState<{last_signal:string; tracking:string}|null>(null);
+  const [signalStatus, setSignalStatus] = useState<{ last_signal: string; tracking: string } | null>(null);
   const [sigLoading,   setSigLoading]   = useState(false);
 
-  // ── Detect user's browser timezone (TradingView behavior) ─────────────────
-  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const userTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-  // ── Create chart (once) ────────────────────────────────────────────────────
+  // ── Create chart once ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
-
-    const formatTimeLocal = (unixSec: number): string => {
-      return new Intl.DateTimeFormat(undefined, {
-        year:     '2-digit',
-        month:    '2-digit',
-        day:      '2-digit',
-        hour:     '2-digit',
-        minute:   '2-digit',
-        hour12:   false,
-        timeZone: userTimezone,
-      }).format(new Date(unixSec * 1000)).replace(',', '');
-    };
 
     const chart = createChart(containerRef.current, {
       autoSize: true,
@@ -188,477 +139,331 @@ export default function ChartComponent({
         scaleMargins: { top: 0.08, bottom: 0.08 },
       },
       localization: {
-        timeFormatter: formatTimeLocal,
+        timeFormatter: (sec: number) =>
+          new Intl.DateTimeFormat(undefined, {
+            year: '2-digit', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', hour12: false,
+            timeZone: userTZ,
+          }).format(new Date(sec * 1000)).replace(',', ''),
       },
       timeScale: {
         borderColor: 'rgba(148,163,184,0.2)',
-        timeVisible: true,
-        secondsVisible: false,
-        fixLeftEdge: true,
-        fixRightEdge: true,
+        timeVisible: true, secondsVisible: false,
+        fixLeftEdge: true, fixRightEdge: true,
         lockVisibleTimeRangeOnResize: true,
       },
-      handleScroll: { mouseWheel:true, pressedMouseMove:true, horzTouchDrag:true, vertTouchDrag:true },
-      handleScale:  { axisPressedMouseMove:true, mouseWheel:true, pinch:true },
-      kineticScroll: { mouse:false, touch:true },
-      watermark: { visible:false },
+      handleScroll:  { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+      handleScale:   { axisPressedMouseMove: true, mouseWheel: true, pinch: true },
+      kineticScroll: { mouse: false, touch: true },
+      watermark:     { visible: false },
     });
 
-    const ASSET_PRICE_FMT: Record<string, {precision: number; minMove: number}> = {
-      'BTCUSD':  { precision: 2, minMove: 0.01 },
-      'ETHUSD':  { precision: 2, minMove: 0.01 },
-      'XAUUSD':  { precision: 2, minMove: 0.01 },
-      'LTCUSD':  { precision: 2, minMove: 0.01 },
-    };
-    const priceFmt = ASSET_PRICE_FMT[asset] ?? { precision: 2, minMove: 0.01 };
-
     const series = chart.addCandlestickSeries({
-      upColor:          COLOR_UP,
-      downColor:        COLOR_DOWN,
-      wickUpColor:      COLOR_UP,
-      wickDownColor:    COLOR_DOWN,
-      borderVisible:    true,
-      borderUpColor:    COLOR_UP,
-      borderDownColor:  COLOR_DOWN,
-      priceLineVisible: true,
-      priceLineColor:   COLOR_UP,
-      priceLineWidth:   1,
-      priceFormat: { type: 'price', ...priceFmt },
+      upColor: COLOR_UP, downColor: COLOR_DOWN,
+      wickUpColor: COLOR_UP, wickDownColor: COLOR_DOWN,
+      borderVisible: true,
+      borderUpColor: COLOR_UP, borderDownColor: COLOR_DOWN,
+      priceLineVisible: true, priceLineColor: COLOR_UP, priceLineWidth: 1,
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
     });
 
     chartRef.current  = chart;
     seriesRef.current = series;
 
     roRef.current = new ResizeObserver(() => {
-      if (containerRef.current && chartRef.current) {
+      if (containerRef.current && chartRef.current)
         chartRef.current.applyOptions({
           width:  containerRef.current.clientWidth,
           height: containerRef.current.clientHeight,
         });
-      }
     });
     roRef.current.observe(containerRef.current);
 
-    return () => {
-      roRef.current?.disconnect();
-      chart.remove();
-      chartRef.current  = null;
-      seriesRef.current = null;
-    };
+    return () => { roRef.current?.disconnect(); chart.remove(); chartRef.current = null; seriesRef.current = null; };
   }, []);
 
-  // ── Load data + WebSocket per asset/timeframe ─────────────────────────────
+  // ── Data + WebSocket per asset/timeframe ───────────────────────────────────
   useEffect(() => {
     setLastPrice(null);
     setSignalStatus(null);
     setSigLoading(true);
-    chartStartTimeRef.current = 0;
-
-    const cacheKey = `${asset}:${timeframe}`;
-    markerCacheRef.current.set(cacheKey, new Map());
-    markersRef.current = markerCacheRef.current.get(cacheKey)!;
-
+    chartStartRef.current = 0;
+    markersRef.current.clear();
     seriesRef.current?.setData([]);
     seriesRef.current?.setMarkers([]);
 
-    const candles: Map<number, CandleDataPoint> = new Map();
+    const candles         = new Map<number, CandleDataPoint>();
+    const preloadBuffer:    BinanceKlineMsg['k'][] = [];
+    let   historyLoaded   = false;
+    const gone            = { current: false };
 
-    const flushMarkers = (minTime: number = chartStartTimeRef.current) => {
+    const flushMarkers = (minTime = chartStartRef.current) => {
       if (!seriesRef.current) return;
       const all = [...markersRef.current.values()];
-      const inWindow = minTime > 0
-        ? all.filter(m => (m.time as number) >= minTime)
-        : all;
-      const sorted = inWindow.sort((a, b) => (a.time as number) - (b.time as number));
-      try { seriesRef.current.setMarkers(sorted); } catch { /* ignore */ }
+      const vis = minTime > 0 ? all.filter(m => (m.time as number) >= minTime) : all;
+      try { seriesRef.current.setMarkers(vis.sort((a, b) => (a.time as number) - (b.time as number))); }
+      catch { /* chart resetting */ }
     };
 
-    const preloadBuffer: KlinePayload[] = [];
-    let historyLoaded = false;
-
-    const gone = { current: false };
-    let socket: WebSocket | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-    // ── Stale-data watchdog ───────────────────────────────────────────────────
-    // If no message arrives within STALE_THRESHOLD_MS, the WS is silently dead.
-    // Force-close it so onclose triggers and the reconnect loop kicks in.
-    let staleTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const resetStaleTimer = () => {
-      if (staleTimer) clearTimeout(staleTimer);
-      staleTimer = setTimeout(() => {
-        if (!gone.current && socket && socket.readyState === WebSocket.OPEN) {
-          console.warn(`⚠️ Stale WS detected for ${asset} ${timeframe} — forcing reconnect`);
-          socket.close(4000, 'stale');
-        }
-      }, STALE_THRESHOLD_MS);
-    };
-
-    const applyKline = (p: KlinePayload) => {
-      const ts    = toUnix(p.timestamp ?? p.time);
-      const close = toFloat(p.close ?? p.price);
-      if (!close || !Number.isFinite(close)) {
-        console.warn('⚠️ Invalid close price:', p);
-        return;
-      }
-
-      const open  = toFloat(p.open,  0);
-      const high  = toFloat(p.high,  0);
-      const low   = toFloat(p.low,   0);
-
+    // ── Apply one Binance kline tick to the chart ─────────────────────────────
+    const applyKline = (k: BinanceKlineMsg['k']) => {
       const interval = TF_SEC[timeframe];
-      const start    = Math.floor(ts / interval) * interval;
+      const start    = Math.floor(k.t / 1000 / interval) * interval;
+      const open     = toFloat(k.o);
+      const high     = toFloat(k.h);
+      const low      = toFloat(k.l);
+      const close    = toFloat(k.c);
+
       const existing = candles.get(start);
+      const candle: CandleDataPoint = existing
+        ? { time: start as Time, open: existing.open,
+            high: Math.max(existing.high, high),
+            low:  Math.min(existing.low,  low), close }
+        : { time: start as Time, open, high, low, close };
 
-      let candle: CandleDataPoint;
-
-      const hasFullOHLC = open > 0 && high > 0 && low > 0 && high >= low;
-
-      if (hasFullOHLC) {
-        if (existing) {
-          candle = {
-            time:  start as Time,
-            open:  existing.open,   // NEVER change the original open
-            high:  Math.max(existing.high, high),
-            low:   Math.min(existing.low,  low),
-            close,
-          };
-        } else {
-          candle = { time: start as Time, open, high, low, close };
-        }
-        candles.set(start, candle);
-      } else if (existing) {
-        candle = {
-          ...existing,
-          close,
-          high:  Math.max(existing.high, close),
-          low:   Math.min(existing.low,  close),
-        };
-        candles.set(start, candle);
-      } else {
-        const sortedKeys = [...candles.keys()].sort((a, b) => a - b);
-        const lastKey    = sortedKeys.length > 0 ? sortedKeys[sortedKeys.length - 1] : null;
-        const prevClose  = lastKey !== null ? (candles.get(lastKey)?.close ?? close) : close;
-        candle = { time: start as Time, open: prevClose, high: close, low: close, close };
-        candles.set(start, candle);
-      }
-
-      console.log('📊 Chart update:', { time: start, close, hasFullOHLC });
-
-      // Update chart price display
+      candles.set(start, candle);
       setLastPrice(close);
-
-      // ── KEY FIX: notify parent so the watchlist shows the SAME price ──────
-      // This is the single source of truth for the selected asset's live price.
       onPriceUpdate?.(asset, close);
-
-      try { seriesRef.current?.update(candle); } catch (e) { console.error('Chart update failed:', e); }
+      try { seriesRef.current?.update(candle); } catch { /* ignore */ }
     };
 
-    // ── WebSocket reconnection — no cap, retries forever ─────────────────────
-    // FIXED: removed MAX_RECONNECT_ATTEMPTS limit that previously caused the
-    // WebSocket to silently stop reconnecting after 10 attempts, leaving the
-    // chart frozen until the user manually refreshed the page.
-    let reconnectAttempts = 0;
-    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    // ════════════════════════════════════════════════════════════════════════
+    // BINANCE WebSocket — DIRECT connection for all price / candle data
+    // Bypasses backend → nginx → Redis → Django Channels chain entirely.
+    // Binance sends a kline tick every ~1 second for liquid pairs so prices
+    // can NEVER get stuck even if the backend is unreachable.
+    // ════════════════════════════════════════════════════════════════════════
+    let binanceWs:         WebSocket | null = null;
+    let binanceRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let binanceRetries     = 0;
+
+    const connectBinance = () => {
+      if (gone.current) return;
+      const sym = ASSET_TO_BINANCE_WS[asset];
+      const ivl = TF_BINANCE[timeframe];
+      const url = `wss://stream.binance.com:9443/ws/${sym}@kline_${ivl}`;
+
+      try { binanceWs = new WebSocket(url); }
+      catch { scheduleBinanceRetry(); return; }
+
+      binanceWs.onopen = () => {
+        setConnected(true);
+        binanceRetries = 0;
+        console.log(`✅ Binance WS: ${asset} ${timeframe}`);
+      };
+
+      binanceWs.onmessage = (ev: MessageEvent<string>) => {
+        try {
+          const msg = JSON.parse(ev.data) as BinanceKlineMsg;
+          if (msg.e !== 'kline') return;
+          if (!historyLoaded) preloadBuffer.push(msg.k);
+          else applyKline(msg.k);
+        } catch { /* ignore */ }
+      };
+
+      binanceWs.onclose = () => {
+        setConnected(false);
+        scheduleBinanceRetry();
+      };
+
+      binanceWs.onerror = () => { setConnected(false); };
+    };
+
+    const scheduleBinanceRetry = () => {
+      if (gone.current) return;
+      binanceRetries++;
+      // Max 10 s backoff — Binance is rock-solid, fast retry is safe
+      const delay = Math.min(1000 * Math.pow(2, Math.min(binanceRetries - 1, 3)), 10_000);
+      console.log(`Binance WS retry in ${delay}ms (#${binanceRetries})`);
+      binanceRetryTimer = setTimeout(connectBinance, delay);
+    };
+
+    // ════════════════════════════════════════════════════════════════════════
+    // BACKEND WebSocket — SIGNALS ONLY
+    // Only used to receive BUY/SELL signal markers from Django.
+    // If this drops, prices still update every second from Binance above.
+    // Shows "Reconnecting…" in the signal area if it drops, NOT in the price.
+    // ════════════════════════════════════════════════════════════════════════
+    let backendWs:         WebSocket | null = null;
+    let backendRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let backendRetries     = 0;
+    let backendHeartbeat:  ReturnType<typeof setInterval> | null = null;
+    let backendStaleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const BACKEND_STALE_MS = 45_000;
+
+    const resetBackendStale = () => {
+      if (backendStaleTimer) clearTimeout(backendStaleTimer);
+      backendStaleTimer = setTimeout(() => {
+        if (!gone.current && backendWs?.readyState === WebSocket.OPEN) {
+          console.warn('Backend WS stale → force-reconnecting');
+          backendWs.close(4000, 'stale');
+        }
+      }, BACKEND_STALE_MS);
+    };
+
+    const connectBackend = () => {
+      if (gone.current) return;
+      const url = `${wsBaseUrl}/ws/market/${asset}/${timeframe}/`;
+
+      try { backendWs = new WebSocket(url); }
+      catch { scheduleBackendRetry(); return; }
+
+      backendWs.onopen = () => {
+        backendRetries = 0;
+        resetBackendStale();
+        // Heartbeat every 20 s to keep nginx proxy alive
+        backendHeartbeat = setInterval(() => {
+          if (backendWs?.readyState === WebSocket.OPEN)
+            try { backendWs.send(JSON.stringify({ action: 'ping' })); } catch { /* ignore */ }
+        }, 20_000);
+      };
+
+      backendWs.onmessage = (ev: MessageEvent<string>) => {
+        resetBackendStale();
+        try {
+          const raw = JSON.parse(ev.data) as Record<string, unknown>;
+          if (raw.type === 'ping') {
+            backendWs?.send(JSON.stringify({ action: 'pong' }));
+            return;
+          }
+          // Only handle signal events — ignore all kline/price messages
+          if (raw.type === 'signal' && historyLoaded)
+            applySignal(raw as unknown as SignalPayload);
+        } catch { /* ignore */ }
+      };
+
+      backendWs.onclose = () => {
+        if (backendHeartbeat)  { clearInterval(backendHeartbeat);  backendHeartbeat  = null; }
+        if (backendStaleTimer) { clearTimeout(backendStaleTimer);   backendStaleTimer = null; }
+        scheduleBackendRetry();
+      };
+
+      backendWs.onerror = () => { /* onclose fires next */ };
+    };
+
+    const scheduleBackendRetry = () => {
+      if (gone.current) return;
+      backendRetries++;
+      const delay = Math.min(1000 * Math.pow(2, Math.min(backendRetries - 1, 4)), 15_000);
+      backendRetryTimer = setTimeout(connectBackend, delay);
+    };
+
+    // ── Signal helpers ────────────────────────────────────────────────────────
+    const SIXTY_MIN = 3600;
 
     const zoneToMarker = (z: { is_bullish: boolean; timestamp: string }, interval: number): SeriesMarker<Time> => {
-      const ts = z.timestamp.includes('+') || z.timestamp.endsWith('Z')
-        ? z.timestamp
-        : z.timestamp + 'Z';
-      const rawTs   = Math.floor(new Date(ts).getTime() / 1000);
-      const snapped = Math.floor(rawTs / interval) * interval;
+      const ts  = z.timestamp.includes('+') || z.timestamp.endsWith('Z') ? z.timestamp : z.timestamp + 'Z';
+      const raw = Math.floor(new Date(ts).getTime() / 1000);
       return {
-        time:     snapped as Time,
-        position: z.is_bullish ? 'belowBar' : 'aboveBar',
-        color:    z.is_bullish ? COLOR_UP    : COLOR_DOWN,
-        shape:    z.is_bullish ? 'arrowUp'   : 'arrowDown',
-        text:     z.is_bullish ? 'BUY SIGNAL': 'SELL SIGNAL',
+        time:     Math.floor(raw / interval) * interval as Time,
+        position: z.is_bullish ? 'belowBar'   : 'aboveBar',
+        color:    z.is_bullish ? COLOR_UP      : COLOR_DOWN,
+        shape:    z.is_bullish ? 'arrowUp'     : 'arrowDown',
+        text:     z.is_bullish ? 'BUY SIGNAL'  : 'SELL SIGNAL',
         size:     2,
       };
     };
 
-    const SIXTY_MIN_S = 60 * 60;
-
-    const mergeAndFlush = (newMarkers: SeriesMarker<Time>[]) => {
-      const sorted = [...newMarkers].sort((a, b) => (a.time as number) - (b.time as number));
-
+    const mergeAndFlush = (incoming: SeriesMarker<Time>[]) => {
+      const sorted = [...incoming].sort((a, b) => (a.time as number) - (b.time as number));
       for (const m of sorted) {
-        const newTime = m.time as number;
-
-        if (markersRef.current.has(newTime)) continue;
-
-        const existingTimes = [...markersRef.current.keys()].sort((a, b) => a - b);
-        const lastTime   = existingTimes.length > 0 ? existingTimes[existingTimes.length - 1] : undefined;
-        const lastMarker = lastTime !== undefined ? markersRef.current.get(lastTime) : undefined;
-
-        if (lastMarker !== undefined && lastTime !== undefined) {
-          const gapSeconds = newTime - lastTime;
-
-          if (gapSeconds < SIXTY_MIN_S) {
-            if (lastMarker.text === m.text && newTime > lastTime) {
-              markersRef.current.delete(lastTime);
-              markersRef.current.set(newTime, m);
-            }
+        const t = m.time as number;
+        if (markersRef.current.has(t)) continue;
+        const times = [...markersRef.current.keys()].sort((a, b) => a - b);
+        const lt    = times.length > 0 ? times[times.length - 1] : undefined;
+        const last  = lt !== undefined ? markersRef.current.get(lt) : undefined;
+        if (last !== undefined && lt !== undefined) {
+          if (t - lt < SIXTY_MIN) {
+            if (last.text === m.text && t > lt) { markersRef.current.delete(lt); markersRef.current.set(t, m); }
             continue;
           }
-
-          if (lastMarker.text === m.text) {
-            if (newTime > lastTime) {
-              markersRef.current.delete(lastTime);
-              markersRef.current.set(newTime, m);
-            }
+          if (last.text === m.text) {
+            if (t > lt) { markersRef.current.delete(lt); markersRef.current.set(t, m); }
             continue;
           }
         }
-
-        if (chartStartTimeRef.current === 0 || newTime >= chartStartTimeRef.current) {
-          markersRef.current.set(newTime, m);
-        }
+        if (chartStartRef.current === 0 || t >= chartStartRef.current) markersRef.current.set(t, m);
       }
-
       flushMarkers();
     };
 
     const applySignal = (s: SignalPayload) => {
-      if (!seriesRef.current) return;
-      const interval = TF_SEC[timeframe];
-
-      const newMarkers: SeriesMarker<Time>[] = s.all_zones.map(
-        (z) => zoneToMarker(z, interval)
-      );
-
-      const chartStart = chartStartTimeRef.current;
-      const inWindow = chartStart > 0
-        ? newMarkers.filter(m => (m.time as number) >= chartStart)
-        : newMarkers;
-
-      if (inWindow.length > 0) {
-        mergeAndFlush(inWindow);
+      const ivl     = TF_SEC[timeframe];
+      const markers = s.all_zones.map(z => zoneToMarker(z, ivl));
+      const visible = chartStartRef.current > 0
+        ? markers.filter(m => (m.time as number) >= chartStartRef.current)
+        : markers;
+      if (visible.length > 0) {
+        mergeAndFlush(visible);
         setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
       }
     };
 
-    const connect = () => {
-      if (gone.current) return;
-
-      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-      if (staleTimer) { clearTimeout(staleTimer); staleTimer = null; }
-
-      try {
-        socket = new WebSocket(`${wsBaseUrl}/ws/market/${asset}/${timeframe}/`);
-
-        socket.onerror = () => {
-          console.error(`Chart WebSocket error: ${asset} ${timeframe}`);
-          setConnected(false);
-        };
-
-        socket.onopen = () => {
-          console.log(`✅ WebSocket connected: ${asset} ${timeframe}`);
-          setConnected(true);
-          reconnectAttempts = 0;
-
-          // Start stale-data watchdog immediately
-          resetStaleTimer();
-
-          // Heartbeat — keeps the TCP connection alive through proxies/load-balancers
-          heartbeatTimer = setInterval(() => {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-              try { socket.send(JSON.stringify({ action: 'ping' })); } catch { /* ignore */ }
-            }
-          }, 20_000); // every 20 s
-        };
-
-        socket.onclose = (event) => {
-          console.warn(`WebSocket closed: ${asset} ${timeframe} (code: ${event.code})`);
-          setConnected(false);
-
-          if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-          if (staleTimer) { clearTimeout(staleTimer); staleTimer = null; }
-
-          if (!gone.current) {
-            // ── No cap on reconnect attempts — retries forever ────────────────
-            // Previously capped at 10 attempts, which caused the chart to freeze
-            // permanently after 10 reconnect failures. Now it always retries.
-            reconnectAttempts++;
-            // Exponential backoff: 1s → 2s → 4s → … capped at 10s (not 30s)
-            // Shorter cap means data resumes faster after a brief network hiccup.
-            const delay = Math.min(1000 * Math.pow(2, Math.min(reconnectAttempts - 1, 4)), 10_000);
-            console.log(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})…`);
-            retryTimer = setTimeout(connect, delay);
-          }
-        };
-
-        socket.onmessage = (ev: MessageEvent<string>) => {
-          // Every message means the connection is alive — reset stale watchdog
-          resetStaleTimer();
-
-          try {
-            const raw = JSON.parse(ev.data) as Record<string, unknown>;
-            const msgType = raw.type as string | undefined;
-
-            console.log('📨 WS MSG:', {
-              type: msgType || 'kline',
-              asset: raw.asset,
-              close: raw.close || raw.price,
-              timestamp: raw.timestamp || raw.time,
-              hasOHLC: !!(raw.open && raw.high && raw.low && raw.close)
-            });
-
-            if (msgType === 'ping') {
-              socket?.send(JSON.stringify({ action:'pong' }));
-              return;
-            }
-
-            if (msgType === 'signal') {
-              console.log('🎯 SIGNAL received:', raw);
-              if (historyLoaded) applySignal(raw as unknown as SignalPayload);
-              return;
-            }
-
-            const p = raw as unknown as KlinePayload;
-            if (!historyLoaded) {
-              preloadBuffer.push(p);
-            } else {
-              applyKline(p);
-            }
-          } catch (err) {
-            console.error('❌ WebSocket parse error:', err);
-          }
-        };
-      } catch (e) {
-        console.error('Failed to create WebSocket:', e);
-        setConnected(false);
-      }
-    };
-
-    connect();
-
-    const fetchSignals = async (chartStartTime: number = 0) => {
+    // ── REST: fetch historical signals ────────────────────────────────────────
+    const fetchSignals = async (chartStart = 0) => {
       if (!seriesRef.current || gone.current) return;
-      setSigLoading(true);
-      const interval = TF_SEC[timeframe];
-
+      const ivl = TF_SEC[timeframe];
       markersRef.current.clear();
-      const cacheKey = `${asset}:${timeframe}`;
-      markerCacheRef.current.delete(cacheKey);
 
       try {
-        const allRawSignals: Array<{is_bullish: boolean; timestamp: string}> = [];
-
+        const allRaw: Array<{ is_bullish: boolean; timestamp: string }> = [];
         try {
-          const dbRes = await fetch(`/api/trading/signal-history/${asset}/?timeframe=${timeframe}`);
-          if (dbRes.ok && !gone.current) {
-            const dbJson = await dbRes.json();
-            if (dbJson.success && dbJson.signals?.length > 0) {
-              for (const z of dbJson.signals as Array<{is_bullish: boolean; timestamp: string}>) {
-                allRawSignals.push(z);
-              }
-            }
-          }
-        } catch { /* DB history optional */ }
+          const r = await fetch(`/api/trading/signal-history/${asset}/?timeframe=${timeframe}`);
+          if (r.ok && !gone.current) { const j = await r.json(); if (j.success) allRaw.push(...(j.signals ?? [])); }
+        } catch { /* optional */ }
 
         if (gone.current) return;
 
-        let liveStatus: {last_signal: string; tracking: string} | null = null;
+        let liveStatus: { last_signal: string; tracking: string } | null = null;
         try {
-          const liveRes = await fetch(`/api/trading/reversal-zones/${asset}/?timeframe=${timeframe}`);
-          if (liveRes.ok && !gone.current) {
-            const liveJson = await liveRes.json();
-            if (liveJson.success && liveJson.data?.zones?.length > 0) {
-              for (const z of liveJson.data.zones as Array<{is_bullish: boolean; timestamp: string}>) {
-                allRawSignals.push(z);
-              }
-              liveStatus = liveJson.data.status ?? null;
-            }
+          const r = await fetch(`/api/trading/reversal-zones/${asset}/?timeframe=${timeframe}`);
+          if (r.ok && !gone.current) {
+            const j = await r.json();
+            if (j.success && j.data?.zones?.length > 0) { allRaw.push(...j.data.zones); liveStatus = j.data.status ?? null; }
           }
-        } catch { /* live signals optional */ }
+        } catch { /* optional */ }
 
         if (gone.current) return;
 
-        const allMarkers = allRawSignals
-          .map(z => zoneToMarker(z, interval))
-          .sort((a, b) => (a.time as number) - (b.time as number));
+        const sorted = allRaw.map(z => zoneToMarker(z, ivl)).sort((a, b) => (a.time as number) - (b.time as number));
+        const final: SeriesMarker<Time>[] = [];
+        const seen = new Set<number>();
 
-        const SIXTY_MIN = 60 * 60;
-        const finalMarkers: SeriesMarker<Time>[] = [];
-        const seenTimes = new Set<number>();
-
-        for (const m of allMarkers) {
+        for (const m of sorted) {
           const t = m.time as number;
-
-          if (seenTimes.has(t)) continue;
-
-          const last = finalMarkers.length > 0 ? finalMarkers[finalMarkers.length - 1] : undefined;
-          const lastTime = last !== undefined ? (last.time as number) : undefined;
-
-          if (lastTime !== undefined) {
-            const gapSeconds = t - lastTime;
-            if (gapSeconds < SIXTY_MIN) {
-              if (last !== undefined && last.text === m.text && t > lastTime) {
-                finalMarkers[finalMarkers.length - 1] = m;
-                seenTimes.delete(lastTime);
-                seenTimes.add(t);
-              }
+          if (seen.has(t)) continue;
+          const last = final.length > 0 ? final[final.length - 1] : undefined;
+          const lt   = last ? (last.time as number) : undefined;
+          if (lt !== undefined) {
+            if (t - lt < SIXTY_MIN) {
+              if (last?.text === m.text && t > lt) { final[final.length - 1] = m; seen.delete(lt); seen.add(t); }
               continue;
             }
+            if (last?.text === m.text) { final[final.length - 1] = m; seen.delete(lt!); seen.add(t); continue; }
           }
-
-          if (last !== undefined && last.text === m.text) {
-            finalMarkers[finalMarkers.length - 1] = m;
-            seenTimes.delete(last.time as number);
-            seenTimes.add(t);
-            continue;
-          }
-
-          finalMarkers.push(m);
-          seenTimes.add(t);
+          final.push(m); seen.add(t);
         }
 
-        const inWindowMarkers = chartStartTime > 0
-          ? finalMarkers.filter(m => (m.time as number) >= chartStartTime)
-          : finalMarkers;
-
-        for (const m of inWindowMarkers) {
-          markersRef.current.set(m.time as number, m);
-        }
-        flushMarkers(chartStartTime);
-
-        if (!gone.current && liveStatus) {
-          setSignalStatus(liveStatus);
-        }
-
+        const visible = chartStart > 0 ? final.filter(m => (m.time as number) >= chartStart) : final;
+        for (const m of visible) markersRef.current.set(m.time as number, m);
+        flushMarkers(chartStart);
+        if (!gone.current && liveStatus) setSignalStatus(liveStatus);
       } catch { /* silent */ }
       finally { if (!gone.current) setSigLoading(false); }
     };
 
+    // ── REST: load historical candles from Binance ────────────────────────────
     const loadHistory = async () => {
       try {
-        const ASSET_TO_BINANCE: Record<string, string> = {
-          'XAUUSD': 'PAXGUSDT',
-          'BTCUSD': 'BTCUSDT',
-          'ETHUSD': 'ETHUSDT',
-          'LTCUSD': 'LTCUSDT',
-        };
-        const sym = ASSET_TO_BINANCE[asset] ?? asset.replace('USD', 'USDT');
-        const TF_LIMIT: Record<Timeframe, number> = {
-          '5m':  1000,
-          '15m': 1000,
-          '30m': 1000,
-          '1h':  750,
-          '2h':  375,
-          '4h':  200,
-          '1d':  180,
-        };
-        const limit = TF_LIMIT[timeframe] ?? 1000;
+        const symbol = ASSET_TO_BINANCE[asset];
         const res = await fetch(
-          `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${TF_BINANCE[timeframe]}&limit=${limit}`
+          `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${TF_BINANCE[timeframe]}&limit=${TF_LIMIT[timeframe]}`
         );
-        const raw = await res.json();
+        const raw: (string | number)[][] = await res.json();
         if (gone.current) return;
 
-        let hist: CandleDataPoint[] = raw.map((k: (string|number)[]) => ({
+        const hist: CandleDataPoint[] = raw.map(k => ({
           time:  Math.floor(Number(k[0]) / 1000) as Time,
           open:  parseFloat(k[1] as string),
           high:  parseFloat(k[2] as string),
@@ -667,50 +472,50 @@ export default function ChartComponent({
         }));
 
         for (const c of hist) candles.set(c.time as number, c);
-
         seriesRef.current?.setData(hist);
         chartRef.current?.timeScale().fitContent();
 
         if (hist.length > 0) {
-          const latestClose = hist[hist.length - 1].close;
-          setLastPrice(latestClose);
-
-          // Immediately sync the watchlist price to match chart on load
-          onPriceUpdate?.(asset, latestClose);
-
-          chartStartTimeRef.current = hist[0].time as number;
+          const latest = hist[hist.length - 1].close;
+          setLastPrice(latest);
+          onPriceUpdate?.(asset, latest);
+          chartStartRef.current = hist[0].time as number;
         }
 
+        // Drain WS ticks that arrived while history was loading
         historyLoaded = true;
-        for (const p of preloadBuffer) applyKline(p);
+        for (const k of preloadBuffer) applyKline(k);
         preloadBuffer.length = 0;
 
-        if (markersRef.current.size > 0) {
-          flushMarkers();
-        }
-
-        const chartStartTime = hist.length > 0 ? (hist[0].time as number) : 0;
-        await fetchSignals(chartStartTime);
-
-      } catch { /* ignore network errors */ }
+        await fetchSignals(chartStartRef.current);
+      } catch (e) {
+        console.error('History load failed:', e);
+        historyLoaded = true; // still drain buffer
+        if (!gone.current) setSigLoading(false);
+      }
     };
 
+    // ── Boot ──────────────────────────────────────────────────────────────────
+    connectBinance();
+    connectBackend();
     loadHistory();
 
     return () => {
       gone.current = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      if (staleTimer) clearTimeout(staleTimer);
-      socket?.close();
+      if (binanceRetryTimer)  clearTimeout(binanceRetryTimer);
+      if (backendRetryTimer)  clearTimeout(backendRetryTimer);
+      if (backendHeartbeat)   clearInterval(backendHeartbeat);
+      if (backendStaleTimer)  clearTimeout(backendStaleTimer);
+      try { binanceWs?.close(); } catch { /* ignore */ }
+      try { backendWs?.close(); } catch { /* ignore */ }
     };
   }, [asset, wsBaseUrl, timeframe]);
 
-  // ── UI ────────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
+
   return (
     <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 shadow-2xl shadow-black/20">
 
-      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-5 py-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-400">Live Chart</p>
@@ -722,49 +527,46 @@ export default function ChartComponent({
           <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm">
             <span className="text-slate-400">Chart Feed: </span>
             <span className={connected === null ? 'text-amber-400' : connected ? 'text-emerald-400' : 'text-rose-400'}>
-              {connected === null ? 'Connecting…' : connected ? 'Live ●' : 'Offline'}
+              {connected === null ? 'Connecting…' : connected ? 'Live ●' : 'Reconnecting…'}
             </span>
           </div>
 
           <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm">
             <span className="text-slate-400">Price: </span>
             <span className="font-bold text-white">
-              {lastPrice === null ? '—' : lastPrice.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+              {lastPrice === null ? '—'
+                : lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
 
-          {/* Dynamic timezone badge */}
-          <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm" title="Chart times are displayed in your local timezone">
+          <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm">
             <span className="text-slate-400">TZ: </span>
             <span className="font-medium text-cyan-300">
-              {userTimezone.split('/').slice(-1)[0].replace(/_/g, ' ')}
+              {userTZ.split('/').pop()?.replace(/_/g, ' ')}
             </span>
           </div>
 
           {signalStatus && timeframe !== '4h' && (
-            <div className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs min-w-[170px]">
+            <div className="min-w-[170px] rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs">
               <div className="flex items-center gap-2">
                 <span className="text-slate-400">Signal:</span>
                 <span className={`font-bold ${
-                  signalStatus.last_signal==='BUY'  ? 'text-[#26a69a]' :
-                  signalStatus.last_signal==='SELL' ? 'text-[#ef5350]' : 'text-slate-300'
+                  signalStatus.last_signal === 'BUY'  ? 'text-[#26a69a]' :
+                  signalStatus.last_signal === 'SELL' ? 'text-[#ef5350]' : 'text-slate-300'
                 }`}>
-                  {signalStatus.last_signal==='BUY' ? '▲ BUY' : signalStatus.last_signal==='SELL' ? '▼ SELL' : signalStatus.last_signal}
+                  {signalStatus.last_signal === 'BUY' ? '▲ BUY' : signalStatus.last_signal === 'SELL' ? '▼ SELL' : signalStatus.last_signal}
                 </span>
               </div>
-              <div className="mt-0.5 text-slate-500 truncate">{signalStatus.tracking}</div>
+              <div className="mt-0.5 truncate text-slate-500">{signalStatus.tracking}</div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Full Dashboard Button */}
       {showFullDashboardButton && subscriptionActive && (
-        <div className="border-b border-slate-800 bg-slate-950/30 flex justify-center px-5 py-4">
-          <a
-            href={`/asset/${asset.toLowerCase()}`}
-            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-500/20 transition hover:from-cyan-600 hover:to-blue-600"
-          >
+        <div className="flex justify-center border-b border-slate-800 bg-slate-950/30 px-5 py-4">
+          <a href={`/asset/${asset.toLowerCase()}`}
+            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-500/20 transition hover:from-cyan-600 hover:to-blue-600">
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -774,54 +576,45 @@ export default function ChartComponent({
         </div>
       )}
 
-      {/* Timeframe selector */}
       <div className="border-b border-slate-800 bg-slate-950/50 px-5 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Timeframe:</span>
-          {TIMEFRAMES.map((tf) => (
+          {TIMEFRAMES.map(tf => (
             <button key={tf} type="button" onClick={() => onTimeframeChange(tf)}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                timeframe===tf
+                timeframe === tf
                   ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/30'
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
-              }`}
-            >
+              }`}>
               {tf.toUpperCase()}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Legend */}
       <div className="flex flex-wrap items-center gap-5 border-b border-slate-800 bg-slate-950/30 px-5 py-2 text-xs">
         <div className="flex items-center gap-1.5">
-          <span style={{color:COLOR_UP}} className="text-base">▲</span>
+          <span style={{ color: COLOR_UP }} className="text-base">▲</span>
           <span className="text-slate-400">BUY SIGNAL — Bullish Reversal</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span style={{color:COLOR_DOWN}} className="text-base">▼</span>
+          <span style={{ color: COLOR_DOWN }} className="text-base">▼</span>
           <span className="text-slate-400">SELL SIGNAL — Bearish Reversal</span>
         </div>
       </div>
 
-      {/* Chart */}
       <div className="relative h-[600px]">
         {sigLoading && (
           <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm">
             <div className="text-center">
-              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent"></div>
-              <p className="mt-3 text-sm text-cyan-400">Loading chart data...</p>
+              <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent" />
+              <p className="mt-3 text-sm text-cyan-400">Loading chart data…</p>
             </div>
           </div>
         )}
-
-        <div className={subscriptionActive
-          ? 'h-full w-full'
-          : 'pointer-events-none h-full w-full select-none blur-sm'
-        }>
+        <div className={subscriptionActive ? 'h-full w-full' : 'pointer-events-none h-full w-full select-none blur-sm'}>
           <div ref={containerRef} className="h-full w-full" />
         </div>
-
         {!subscriptionActive && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/55 backdrop-blur-[2px]">
             <div className="mx-4 max-w-md rounded-2xl border border-amber-500/30 bg-slate-900/95 p-6 text-center shadow-2xl shadow-black/30">

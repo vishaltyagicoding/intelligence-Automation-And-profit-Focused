@@ -98,95 +98,41 @@ jobs:
             sudo docker-compose build django celery_worker celery_beat frontend
           EOF
 
-      - name: 🔐 Obtain SSL certificate (production, with retry)
+      - name: 🔐 Obtain SSL certificate (staging – no rate limits)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
-            DOMAIN="smartriskfx.com"
-            CERT_PATH="./nginx/ssl/live/${DOMAIN}/fullchain.pem"
 
-            # ── Skip if a valid PRODUCTION certificate already exists ──────────
-            # Checks that the cert exists AND is not a staging cert AND is not
-            # expiring within 30 days — avoids burning Let's Encrypt rate limits
-            # on every deploy and prevents the "Service busy" error loop.
-            if [ -f "$CERT_PATH" ]; then
-              # Reject staging/test certificates (contain "Fake LE" in issuer)
-              IS_STAGING=$(openssl x509 -in "$CERT_PATH" -noout -issuer 2>/dev/null | grep -c "Fake LE" || true)
-              EXPIRY=$(openssl x509 -in "$CERT_PATH" -noout -checkend 2592000 2>/dev/null; echo $?)
-              # EXPIRY=0 means cert is valid for 30+ days; IS_STAGING=0 means production cert
-              if [ "$IS_STAGING" = "0" ] && [ "$EXPIRY" = "0" ]; then
-                echo "✅ Valid production certificate already exists and is not expiring soon — skipping certbot."
-                sudo chmod -R 755 ./nginx/ssl
-                exit 0
-              elif [ "$IS_STAGING" != "0" ]; then
-                echo "⚠️  Existing cert is a staging/test cert — replacing with production cert."
-                sudo rm -rf "./nginx/ssl/live/${DOMAIN}" "./nginx/ssl/archive/${DOMAIN}"
-              else
-                echo "⚠️  Existing cert expires within 30 days — renewing."
-              fi
-            fi
+            # Remove any old/corrupted certificate data
+            sudo rm -rf ./nginx/ssl/live/smartriskfx.com
+            sudo rm -rf ./nginx/ssl/archive/smartriskfx.com
 
-            # Free port 80 before standalone challenge
-            sudo fuser -k 80/tcp 2>/dev/null || true
-            sleep 2
+            echo "🔐 Obtaining TEST certificate from Let's Encrypt staging..."
+            sudo fuser -k 80/tcp || true
 
-            # ── Request PRODUCTION certificate with retry logic ───────────────
-            # "Service busy; retry later" is a transient Let's Encrypt error.
-            # Retry up to 5 times with increasing delays before failing the deploy.
-            MAX_ATTEMPTS=5
-            ATTEMPT=0
-            SUCCESS=false
+            # CORRECT DOMAIN NAME (no typo)
+            sudo docker run --rm \
+              -v $(pwd)/nginx/ssl:/etc/letsencrypt \
+              -p 80:80 \
+              certbot/certbot certonly --standalone \
+              -d smartriskfx.com \
+              -d www.smartriskfx.com \
+              --email ${{ secrets.CERTBOT_EMAIL }} \
+              --agree-tos \
+              --no-eff-email \
+              --non-interactive \
+              --test-cert
 
-            while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-              ATTEMPT=$((ATTEMPT + 1))
-              echo ""
-              echo "🔐 Certbot attempt ${ATTEMPT}/${MAX_ATTEMPTS} — requesting PRODUCTION cert..."
-
-              sudo docker run --rm \
-                -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-                -p 80:80 \
-                certbot/certbot certonly --standalone \
-                  -d smartriskfx.com \
-                  -d www.smartriskfx.com \
-                  --email ${{ secrets.CERTBOT_EMAIL }} \
-                  --agree-tos \
-                  --no-eff-email \
-                  --non-interactive \
-                  --keep-until-expiring \
-                  2>&1
-
-              EXIT_CODE=$?
-
-              if [ $EXIT_CODE -eq 0 ]; then
-                SUCCESS=true
-                echo "✅ Production SSL certificate obtained on attempt ${ATTEMPT}!"
-                break
-              fi
-
-              if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
-                # Exponential backoff: 15s, 30s, 60s, 120s between retries
-                WAIT=$((15 * (2 ** (ATTEMPT - 1))))
-                echo "⏳ Attempt ${ATTEMPT} failed — retrying in ${WAIT}s..."
-                sleep $WAIT
-              fi
-            done
-
-            if [ "$SUCCESS" != "true" ]; then
-              echo ""
-              echo "❌ SSL certificate failed after ${MAX_ATTEMPTS} attempts."
-              echo ""
-              echo "=== Diagnostics ==="
-              echo "DNS resolution for smartriskfx.com:"
-              dig smartriskfx.com +short 2>/dev/null || nslookup smartriskfx.com 2>/dev/null || echo "dig/nslookup not available"
-              echo "Port 80 status:"
-              sudo ss -tlnp | grep ':80' || echo "Nothing on port 80"
+            if [ $? -eq 0 ]; then
+              echo "✅ Staging SSL certificate obtained!"
+              sudo chmod -R 755 ./nginx/ssl
+            else
+              echo "❌ SSL certificate failed. Check DNS resolution for smartriskfx.com and port 80."
+              # Diagnostic: show DNS resolution
+              echo "=== DNS lookup for smartriskfx.com ==="
+              dig smartriskfx.com +short || nslookup smartriskfx.com
               exit 1
             fi
-
-            sudo chmod -R 755 ./nginx/ssl
-            echo ""
-            echo "✅ Certificate files:"
-            ls -la ./nginx/ssl/live/${DOMAIN}/ 2>/dev/null || echo "Certificate path not found"
           EOF
 
       - name: 🚀 Start all services (with SSL)
@@ -275,16 +221,11 @@ jobs:
             sudo docker-compose restart celery_beat celery_worker
           EOF
 
-      - name: ⏰ Configure SSL auto-renewal (production)
+      - name: 🔐 Setup SSL auto-renewal (staging)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            # Run twice daily (Let's Encrypt recommendation).
-            # --keep-until-expiring means certbot only actually renews when < 30 days remain,
-            # so running it twice daily costs nothing unless renewal is genuinely needed.
-            (crontab -l 2>/dev/null | grep -v "certbot renew"; \
-             echo "0 0,12 * * * cd ~/smartrisk && sudo fuser -k 80/tcp 2>/dev/null || true && sudo docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt -p 80:80 certbot/certbot renew --standalone --keep-until-expiring --quiet && sudo docker-compose exec -T nginx nginx -s reload") \
-            | crontab -
-            echo "✅ SSL auto-renewal configured (production, twice daily)"
+            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true' --post-hook 'cd ~/smartrisk && sudo docker-compose exec -T nginx nginx -s reload' --quiet --test-cert") | crontab -
+            echo "✅ SSL auto-renewal installed (staging environment)"
           EOF
 
       - name: 📊 Deployment Summary
@@ -293,8 +234,8 @@ jobs:
           echo "✅ DEPLOYMENT SUCCESSFUL!"
           echo "=========================================================================="
           echo "🌐 https://smartriskfx.com"
-          echo "🔒 SSL: Production certificate (trusted by all browsers)"
-          echo "🔄 Auto-renewal: Configured (cron runs twice daily, renews when < 30 days)"
+          echo "🔒 SSL is active (staging certificate – browser will show 'Not Secure')"
+          echo "⚠️ To get a production certificate, set '--test-cert' and '--staging' flags to false after rate limit expires."
           echo "=========================================================================="
 
   notify-failure:

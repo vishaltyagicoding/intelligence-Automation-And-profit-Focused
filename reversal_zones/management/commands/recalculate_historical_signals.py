@@ -261,6 +261,18 @@ class Command(BaseCommand):
     def _find_bar_index(self, df, reversal_time):
         """Find the bar index closest to reversal_time"""
         try:
+            import pytz
+            
+            # Ensure reversal_time is timezone-aware (UTC)
+            if reversal_time.tzinfo is None:
+                reversal_time = pytz.UTC.localize(reversal_time)
+            
+            # Ensure DataFrame timestamps are timezone-aware (UTC)
+            if df['timestamp'].dt.tz is None:
+                df['timestamp'] = df['timestamp'].dt.tz_localize('UTC')
+            else:
+                df['timestamp'] = df['timestamp'].dt.tz_convert('UTC')
+            
             # Find the index of the candle closest to reversal_time
             df['time_diff'] = abs(df['timestamp'] - reversal_time)
             closest_idx = df['time_diff'].idxmin()

@@ -77,40 +77,20 @@ def _professional_sl_target(
     timeframe: str = '5m',
 ) -> tuple[float, float]:
     """
-    Universal stop loss & target calculation that adapts to symbol price levels.
+    Professional stop loss & target for real algo trading.
 
     LOGIC:
-    - High-priced symbols (price > $1000): Use absolute point-based buffers
-    - Low-priced symbols (price ≤ $1000): Use percentage-based buffers
-    - BUY signal → scans backwards to find first bearish (red) candle
-    - SELL signal → finds first bullish (green) candle
-    - Skips doji/flat candles (body < 0.01% of price)
-    - Target = always 2:1 Risk:Reward (entry + 2 × risk for BUY)
-    - ATR safety guards: minimum 1.5× ATR distance, cap at 3× ATR
+    - Stop Loss: Scan backwards to find first bearish/bullish candle, use its low/high
+    - Target: MINIMUM 7% profit target for all symbols (real trading requirement)
+    - Skip doji candles (body < 0.1% of price)
+    - ATR safety guards: minimum 1.5× ATR, cap at 5× ATR
     """
-    # ── Universal Constants ──────────────────────────────────────────────
-    HIGH_PRICE_THRESHOLD = 1000.0  # symbols > $1000 use absolute points
-    
-    # High-priced symbol constants (absolute points)
-    BUFFER_POINTS_HIGH   = 20.0    # fixed buffer in real price points
-    SMALL_MOVE_HIGH      = 20.0    # if candle moved < 20 points
-    MEDIUM_MOVE_HIGH     = 30.0    # if candle moved 20-30 points
-    EXTRA_BUFFER_HIGH    = 20.0    # extra buffer for small/medium moves
-    
-    # Low-priced symbol constants (percentages)
-    BUFFER_PCT_LOW       = 0.0003  # 0.03% buffer
-    SMALL_MOVE_PCT_LOW   = 0.0002  # if candle moved < 0.02%
-    MEDIUM_MOVE_PCT_LOW  = 0.0005  # if candle moved 0.02%-0.05%
-    
-    # Common constants
-    ATR_MIN_MULT    = 1.5   # minimum SL distance = 1.5 × ATR
-    ATR_MAX_MULT    = 3.0   # cap SL distance at 3.0 × ATR
-    RR_RATIO        = 2.0   # profit target = risk × 2
-    LOOKBACK        = 30    # max candles to look back
-    DOJI_THRESHOLD  = 0.0001 # candle body < 0.01% of price = doji
-
-    # Determine if high-priced or low-priced symbol
-    is_high_priced = center_price > HIGH_PRICE_THRESHOLD
+    # ── Constants ────────────────────────────────────────────────────────
+    MIN_TARGET_PCT  = 0.07      # MINIMUM 7% target for real trading
+    ATR_MIN_MULT    = 1.5       # minimum SL distance = 1.5 × ATR
+    ATR_MAX_MULT    = 5.0       # cap SL distance at 5.0 × ATR
+    LOOKBACK        = 50        # max candles to look back
+    DOJI_THRESHOLD  = 0.001     # candle body < 0.1% of price = doji
 
     n           = len(df)
     look_start  = max(0, bar_index - LOOKBACK)
@@ -131,41 +111,11 @@ def _professional_sl_target(
             body_pct = abs(o - c) / o if o > 0 else 0
 
             if body_pct < DOJI_THRESHOLD:
-                # Doji (body < 0.01% of price) — skip, look further back
+                # Doji (body < 0.1% of price) — skip, look further back
                 continue
 
-            # Found meaningful bearish candle
-            candle_move = abs(o - c)  # real price points moved
-            
-            if is_high_priced:
-                # ── HIGH-PRICED SYMBOL: Absolute point-based buffer ──────
-                if SMALL_MOVE_HIGH <= candle_move <= MEDIUM_MOVE_HIGH:
-                    # Candle moved 20-30 points → add 20 extra buffer
-                    buffer = candle_move + EXTRA_BUFFER_HIGH
-                elif candle_move < SMALL_MOVE_HIGH:
-                    # Candle moved < 20 points → add 20 extra buffer
-                    buffer = candle_move + EXTRA_BUFFER_HIGH
-                else:
-                    # Candle moved > 30 points → use move as buffer
-                    buffer = candle_move
-                
-                sl_level = low - buffer
-            else:
-                # ── LOW-PRICED SYMBOL: Percentage-based buffer ───────────
-                move_pct = candle_move / center_price
-                
-                if SMALL_MOVE_PCT_LOW <= move_pct <= MEDIUM_MOVE_PCT_LOW:
-                    # Candle moved 0.02%-0.05% → add 0.03% buffer
-                    buffer = candle_move + (center_price * BUFFER_PCT_LOW)
-                elif move_pct < SMALL_MOVE_PCT_LOW:
-                    # Candle moved < 0.02% → add 0.03% buffer
-                    buffer = candle_move + (center_price * BUFFER_PCT_LOW)
-                else:
-                    # Candle moved > 0.05% → use move as buffer
-                    buffer = candle_move
-                
-                sl_level = low - buffer
-            
+            # Found meaningful bearish candle - use its LOW as stop loss base
+            sl_level = low
             break
 
         if sl_level is None:
@@ -177,13 +127,22 @@ def _professional_sl_target(
         atr_max_sl = center_price - (atr_now * ATR_MAX_MULT)
 
         stop_loss = min(sl_level, atr_min_sl)  # take the lower (more protection)
-        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 3× ATR
+        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 5× ATR
 
-        # ── Target: 2 : 1 R : R ──────────────────────────────────────────
-        risk   = center_price - stop_loss
+        # ── Target: MINIMUM 7% profit ────────────────────────────────────
+        # Calculate risk
+        risk = center_price - stop_loss
         if risk <= 0:
             risk = atr_now * ATR_MIN_MULT
-        target = center_price + (risk * RR_RATIO)
+        
+        # Calculate minimum 7% target (MANDATORY for real trading)
+        min_target = center_price * (1 + MIN_TARGET_PCT)
+        
+        # Use 3:1 risk-reward for better profit potential
+        rr_target = center_price + (risk * 3.0)
+        
+        # ALWAYS take the HIGHER of the two (ensures minimum 7% profit)
+        target = max(min_target, rr_target)
 
     else:
         # ── SELL: find previous bullish (green) candle ────────────────────
@@ -202,38 +161,8 @@ def _professional_sl_target(
             if body_pct < DOJI_THRESHOLD:
                 continue   # doji – skip
 
-            # Found meaningful bullish candle
-            candle_move = abs(c - o)  # real price points moved
-            
-            if is_high_priced:
-                # ── HIGH-PRICED SYMBOL: Absolute point-based buffer ──────
-                if SMALL_MOVE_HIGH <= candle_move <= MEDIUM_MOVE_HIGH:
-                    # Candle moved 20-30 points → add 20 extra buffer
-                    buffer = candle_move + EXTRA_BUFFER_HIGH
-                elif candle_move < SMALL_MOVE_HIGH:
-                    # Candle moved < 20 points → add 20 extra buffer
-                    buffer = candle_move + EXTRA_BUFFER_HIGH
-                else:
-                    # Candle moved > 30 points → use move as buffer
-                    buffer = candle_move
-                
-                sl_level = high + buffer
-            else:
-                # ── LOW-PRICED SYMBOL: Percentage-based buffer ───────────
-                move_pct = candle_move / center_price
-                
-                if SMALL_MOVE_PCT_LOW <= move_pct <= MEDIUM_MOVE_PCT_LOW:
-                    # Candle moved 0.02%-0.05% → add 0.03% buffer
-                    buffer = candle_move + (center_price * BUFFER_PCT_LOW)
-                elif move_pct < SMALL_MOVE_PCT_LOW:
-                    # Candle moved < 0.02% → add 0.03% buffer
-                    buffer = candle_move + (center_price * BUFFER_PCT_LOW)
-                else:
-                    # Candle moved > 0.05% → use move as buffer
-                    buffer = candle_move
-                
-                sl_level = high + buffer
-            
+            # Found meaningful bullish candle - use its HIGH as stop loss base
+            sl_level = high
             break
 
         if sl_level is None:
@@ -244,13 +173,22 @@ def _professional_sl_target(
         atr_max_sl = center_price + (atr_now * ATR_MAX_MULT)
 
         stop_loss = max(sl_level, atr_min_sl)  # take the higher (more protection)
-        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 3× ATR
+        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 5× ATR
 
-        # ── Target: 2 : 1 R : R ──────────────────────────────────────────
-        risk   = stop_loss - center_price
+        # ── Target: MINIMUM 7% profit ────────────────────────────────────
+        # Calculate risk
+        risk = stop_loss - center_price
         if risk <= 0:
             risk = atr_now * ATR_MIN_MULT
-        target = center_price - (risk * RR_RATIO)
+        
+        # Calculate minimum 7% target (7% DOWN from entry for SELL - MANDATORY)
+        min_target = center_price * (1 - MIN_TARGET_PCT)
+        
+        # Use 3:1 risk-reward for better profit potential
+        rr_target = center_price - (risk * 3.0)
+        
+        # ALWAYS take the LOWER of the two (ensures minimum 7% profit down)
+        target = min(min_target, rr_target)
 
     # Round to 2 decimal places for consistency
     stop_loss = round(stop_loss, 2)

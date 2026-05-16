@@ -37,24 +37,24 @@ logger = logging.getLogger(__name__)
 # ── All symbols in BTCUSDT format (matches Binance API + DB) ─────────────────
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "PAXGUSDT", "LTCUSDT"]
 
-ALL_TIMEFRAMES = ["1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d"]
+ALL_TIMEFRAMES = ["5m", "15m", "30m", "1h", "2h", "4h", "1d"]
 
 BINANCE_TF = {
-    "1m": "1m", "3m": "3m", "5m": "5m", "10m": "5m",
+    "5m": "5m",
     "15m": "15m", "30m": "30m", "1h": "1h",
     "2h": "2h", "4h": "4h", "1d": "1d",
 }
 
 # Full history window per timeframe (daily full recalculation)
 DAYS_BACK = {
-    "1m": 7,   "3m": 14,  "5m": 21,  "10m": 30,
+    "5m": 21,
     "15m": 30, "30m": 30, "1h": 30,
     "2h": 30,  "4h": 30,  "1d": 30,
 }
 
 # Recent window for 30-min incremental updates (hours)
 RECENT_HOURS = {
-    "1m": 6,   "3m": 12,  "5m": 24,  "10m": 48,
+    "5m": 24,
     "15m": 48, "30m": 72, "1h": 96,
     "2h": 120, "4h": 168, "1d": 720,
 }
@@ -340,9 +340,6 @@ def calculate_history_for_symbol_timeframe(self, symbol: str, timeframe: str):
             logger.warning("Not enough data: %s %s", symbol, timeframe)
             return {"status": "no_data"}
 
-        if timeframe == "10m":
-            df = _aggregate_10m(df)
-
         result = AntiChopFilter(timeframe=timeframe).process(df)
         zones  = result.get("zones", [])
         saved  = _save_zones_to_db(symbol, timeframe, zones)
@@ -369,7 +366,7 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
     save any NEW signals that appear after the last saved DB signal.
 
     This is the task that makes signal detection CONTINUOUS.
-    Runs every 30 minutes for all 4 symbols × 10 timeframes = 40 tasks.
+    Runs every 30 minutes for all 4 symbols × 7 timeframes = 28 tasks.
     """
     from reversal_zones.signal_filter import AntiChopFilter
 
@@ -382,9 +379,6 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
         df = _fetch_binance_recent(symbol, binance_tf, hours_back)
         if df.empty or len(df) < 20:
             return {"status": "no_data"}
-
-        if timeframe == "10m":
-            df = _aggregate_10m(df)
 
         result    = AntiChopFilter(timeframe=timeframe).process(df)
         all_zones = result.get("zones", [])

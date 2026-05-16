@@ -74,29 +74,33 @@ def _professional_sl_target(
     center_price: float,
     is_bullish: bool,
     atr_now: float,
+    timeframe: str = '5m',
 ) -> tuple[float, float]:
     """
-    Professional stop loss & target based on swing-candle structure.
+    Professional stop loss & target based on swing-candle structure + timeframe.
 
-    BUY signal
-    ----------
-    Look backwards from bar_index for the first BEARISH candle (close < open).
-    • Skip doji/flat candles  (|close - open| < 0.1% of price)
-    • Use candle_low - (1.5 × ATR) as stop loss
-    • Cap stop distance at 3× ATR (avoids unreasonably wide stops)
-    • Target = entry + 2× risk  (minimum 2 : 1 Risk : Reward)
+    Uses ATR-based calculation with timeframe-specific minimum distances to ensure
+    realistic stop loss and target values for production algo trading.
 
-    SELL signal
-    -----------
-    Mirror logic using BULLISH candles (close > open).
-    Stop = candle_high + (1.5 × ATR).
-    Target = entry − 2× risk.
-
-    This ensures realistic stop loss and target values for ALL asset prices.
+    Timeframe-based minimums:
+    - 5m: 1.5% SL, 3.0% TP
+    - 15m, 30m: 1.0% SL, 2.0% TP
+    - 1h, 2h: 0.8% SL, 1.6% TP
+    - 4h, 1d: 0.5% SL, 1.0% TP
     """
+    # Timeframe-based minimum stop loss percentages
+    TF_MIN_SL_PCT = {
+        '5m': 0.015,
+        '15m': 0.010, '30m': 0.010,
+        '1h': 0.008, '2h': 0.008,
+        '4h': 0.005, '1d': 0.005,
+    }
+    
+    min_sl_pct = TF_MIN_SL_PCT.get(timeframe, 0.010)  # Default 1.0%
+    
     ATR_BUFFER_MULT = 1.5   # buffer = 1.5 × ATR below/above swing candle
     ATR_MIN_MULT    = 2.0   # minimum SL distance = 2.0 × ATR
-    ATR_MAX_MULT    = 4.0   # cap SL distance at  4.0 × ATR
+    ATR_MAX_MULT    = 5.0   # cap SL distance at  5.0 × ATR
     RR_RATIO        = 2.0   # profit target = risk × 2
     LOOKBACK        = 30    # max candles to look back
     DOJI_THRESHOLD  = 0.001 # candle body < 0.1% of price = doji
@@ -132,17 +136,18 @@ def _professional_sl_target(
             # No suitable bearish candle found – ATR fallback
             sl_level = center_price - (atr_now * ATR_MIN_MULT)
 
-        # ── Enforce minimum & maximum ATR distance ────────────────────────
-        atr_min_sl = center_price - (atr_now * ATR_MIN_MULT)
+        # ── Enforce minimum stop loss distance based on timeframe ────────
+        min_sl_distance = center_price * min_sl_pct
+        atr_min_sl = center_price - max(atr_now * ATR_MIN_MULT, min_sl_distance)
         atr_max_sl = center_price - (atr_now * ATR_MAX_MULT)
 
         stop_loss = min(sl_level, atr_min_sl)  # take the lower (more protection)
-        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 4× ATR
+        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 5× ATR
 
         # ── Target: 2 : 1 R : R ──────────────────────────────────────────
         risk   = center_price - stop_loss
         if risk <= 0:
-            risk = atr_now * ATR_MIN_MULT
+            risk = max(atr_now * ATR_MIN_MULT, min_sl_distance)
         target = center_price + (risk * RR_RATIO)
 
     else:
@@ -170,17 +175,18 @@ def _professional_sl_target(
         if sl_level is None:
             sl_level = center_price + (atr_now * ATR_MIN_MULT)
 
-        # ── Enforce minimum & maximum ATR distance ────────────────────────
-        atr_min_sl = center_price + (atr_now * ATR_MIN_MULT)
+        # ── Enforce minimum stop loss distance based on timeframe ────────
+        min_sl_distance = center_price * min_sl_pct
+        atr_min_sl = center_price + max(atr_now * ATR_MIN_MULT, min_sl_distance)
         atr_max_sl = center_price + (atr_now * ATR_MAX_MULT)
 
         stop_loss = max(sl_level, atr_min_sl)  # take the higher (more protection)
-        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 4× ATR
+        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 5× ATR
 
         # ── Target: 2 : 1 R : R ──────────────────────────────────────────
         risk   = stop_loss - center_price
         if risk <= 0:
-            risk = atr_now * ATR_MIN_MULT
+            risk = max(atr_now * ATR_MIN_MULT, min_sl_distance)
         target = center_price - (risk * RR_RATIO)
 
     return float(stop_loss), float(target)
@@ -218,7 +224,8 @@ class ReversalZoneCalculator:
                  custom_abs=0.05,
                  confirm_bars=0,
                  zone_thickness_pct=0.03,
-                 max_zones=8):
+                 max_zones=8,
+                 timeframe="5m"):
         self.cfg = Config(
             preset=preset,
             calc_mode=calc_mode,
@@ -229,6 +236,7 @@ class ReversalZoneCalculator:
             zone_thickness_pct=zone_thickness_pct,
             max_zones=max_zones,
         )
+        self.timeframe = timeframe  # Store timeframe for SL/Target calculation
         
         # Outputs populated by run()
         self.reversals: List[ReversalEvent] = []
@@ -408,6 +416,7 @@ class ReversalZoneCalculator:
                 center_price=r.price,
                 is_bullish=r.is_bullish,
                 atr_now=atr_val,
+                timeframe=self.timeframe,
             )
 
             # Layout:

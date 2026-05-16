@@ -161,7 +161,7 @@ class AntiChopFilter:
             preset=preset, calc_mode=calc_mode, avg_len=avg_len,
             atr_len=atr_len, custom_abs=custom_abs,
             confirm_bars=confirm_bars, zone_thickness_pct=zone_thickness_pct,
-            max_zones=max_zones,
+            max_zones=max_zones, timeframe=timeframe,
         )
         self.use_time = use_time_filter
         self.use_atr  = use_atr_filter

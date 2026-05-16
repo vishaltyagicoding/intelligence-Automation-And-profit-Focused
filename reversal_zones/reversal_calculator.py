@@ -68,6 +68,130 @@ def _ema(series: pd.Series, length: int) -> pd.Series:
     return series.ewm(span=length, adjust=False).mean()
 
 
+def _professional_sl_target(
+    df: pd.DataFrame,
+    bar_index: int,
+    center_price: float,
+    is_bullish: bool,
+    atr_now: float,
+) -> tuple[float, float]:
+    """
+    Professional stop loss & target based on swing-candle structure.
+
+    BUY signal
+    ----------
+    Look backwards from bar_index for the first BEARISH candle (close < open).
+    • Skip doji/flat candles  (|close - open| < 1 real price point)
+    • If the candle only moved 20-30 real points, add 20 extra buffer points
+    • Use candle_low  - 20 real points  as stop loss
+    • If no meaningful bearish candle found, fall back to 1.5× ATR below entry
+    • Cap stop distance at 3× ATR (avoids unreasonably wide stops)
+    • Target = entry + 2× risk  (minimum 2 : 1 Risk : Reward)
+
+    SELL signal
+    -----------
+    Mirror logic using BULLISH candles (close > open).
+    Stop = candle_high + 20 real points.
+    Target = entry − 2× risk.
+
+    "Real points" means whole integer price units (e.g. $20 for BTC, not $0.20).
+    """
+    BUFFER          = 20    # buffer in whole price units appended below/above SL candle
+    SMALL_THRESHOLD = 30    # candle body ≤ 30 whole units  → "small candle" extra buffer
+    ATR_MIN_MULT    = 1.5   # minimum SL distance = 1.5 × ATR
+    ATR_MAX_MULT    = 3.0   # cap SL distance at  3.0 × ATR
+    RR_RATIO        = 2.0   # profit target = risk × 2
+    LOOKBACK        = 30    # max candles to look back
+
+    n           = len(df)
+    look_start  = max(0, bar_index - LOOKBACK)
+    sl_level    = None
+
+    if is_bullish:
+        # ── BUY: find previous bearish (red) candle ──────────────────────
+        for i in range(bar_index - 1, look_start - 1, -1):
+            if i < 0 or i >= n:
+                continue
+            o   = float(df['open'].iloc[i])
+            c   = float(df['close'].iloc[i])
+            low = float(df['low'].iloc[i])
+
+            if c >= o:
+                continue   # not a bearish candle
+
+            body = o - c   # whole price units moved down
+
+            if body < 1.0:
+                # Same-to-same price (doji) — skip, look further back
+                continue
+
+            if body <= SMALL_THRESHOLD:
+                # Small candle: only moved 20-30 pts → use low then add 20 extra
+                sl_level = low - BUFFER
+            else:
+                # Significant bearish candle → use its low with normal buffer
+                sl_level = low - BUFFER
+            break
+
+        if sl_level is None:
+            # No suitable bearish candle found – ATR fallback
+            sl_level = center_price - (atr_now * ATR_MIN_MULT)
+
+        # ── Enforce minimum & maximum ATR distance ────────────────────────
+        atr_min_sl = center_price - (atr_now * ATR_MIN_MULT)
+        atr_max_sl = center_price - (atr_now * ATR_MAX_MULT)
+
+        stop_loss = min(sl_level, atr_min_sl)  # take the lower (more protection)
+        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 3× ATR
+
+        # ── Target: 2 : 1 R : R ──────────────────────────────────────────
+        risk   = center_price - stop_loss
+        if risk <= 0:
+            risk = atr_now * ATR_MIN_MULT
+        target = center_price + (risk * RR_RATIO)
+
+    else:
+        # ── SELL: find previous bullish (green) candle ────────────────────
+        for i in range(bar_index - 1, look_start - 1, -1):
+            if i < 0 or i >= n:
+                continue
+            o    = float(df['open'].iloc[i])
+            c    = float(df['close'].iloc[i])
+            high = float(df['high'].iloc[i])
+
+            if c <= o:
+                continue   # not a bullish candle
+
+            body = c - o   # whole price units moved up
+
+            if body < 1.0:
+                continue   # doji – skip
+
+            if body <= SMALL_THRESHOLD:
+                sl_level = high + BUFFER
+            else:
+                sl_level = high + BUFFER
+            break
+
+        if sl_level is None:
+            sl_level = center_price + (atr_now * ATR_MIN_MULT)
+
+        # ── Enforce minimum & maximum ATR distance ────────────────────────
+        atr_min_sl = center_price + (atr_now * ATR_MIN_MULT)
+        atr_max_sl = center_price + (atr_now * ATR_MAX_MULT)
+
+        stop_loss = max(sl_level, atr_min_sl)  # take the higher (more protection)
+        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 3× ATR
+
+        # ── Target: 2 : 1 R : R ──────────────────────────────────────────
+        risk   = stop_loss - center_price
+        if risk <= 0:
+            risk = atr_now * ATR_MIN_MULT
+        target = center_price - (risk * RR_RATIO)
+
+    return float(stop_loss), float(target)
+
+
 def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
     """Average True Range."""
     prev_close = close.shift(1)
@@ -266,20 +390,59 @@ class ReversalZoneCalculator:
                     self._run_high_raw = hir
                     self._run_high_bar = actual_bar
         
-        # Build output
+        # ── Build output with PROFESSIONAL stop loss and target ──────────────
+        # Replace the old tiny outer_half formula with swing-structure SL/Target.
+        # outer_top  = higher price level  (target for BUY,  stop loss for SELL)
+        # outer_bottom = lower price level (stop loss for BUY, target for SELL)
         zones = []
+        n_df = len(df)
         for r in self.reversals[-self.cfg.max_zones:]:
+            bar_idx = min(max(r.bar_index, 0), n_df - 1)
+
+            # ATR at the signal bar (fallback: 0.2% of price)
+            atr_val = (
+                float(self._atr_series.iloc[bar_idx])
+                if bar_idx < len(self._atr_series)
+                   and not pd.isna(self._atr_series.iloc[bar_idx])
+                else abs(r.price) * 0.002
+            )
+
+            # Professional stop loss & target
+            stop_loss, target = _professional_sl_target(
+                df=df,
+                bar_index=bar_idx,
+                center_price=r.price,
+                is_bullish=r.is_bullish,
+                atr_now=atr_val,
+            )
+
+            # Layout:
+            #   BUY  → outer_bottom = stop_loss (below entry)
+            #           outer_top   = target    (above entry)
+            #   SELL → outer_top    = stop_loss (above entry)
+            #           outer_bottom = target   (below entry)
+            if r.is_bullish:
+                outer_top_val    = target
+                outer_bottom_val = stop_loss
+            else:
+                outer_top_val    = stop_loss
+                outer_bottom_val = target
+
+            # Keep core zone tight around entry for chart visualisation
+            core_half = max(atr_val * 0.12, abs(r.price) * 0.00015)
+
+            ts = r.timestamp if hasattr(r, 'timestamp') else df.index[bar_idx]
             zones.append({
-                'bar_index': r.bar_index,
+                'bar_index':    r.bar_index,
                 'center_price': r.price,
-                'outer_top': r.price + r.outer_half,
-                'outer_bottom': r.price - r.outer_half,
-                'core_top': r.price + r.core_half,
-                'core_bottom': r.price - r.core_half,
-                'is_bullish': r.is_bullish,
-                'label_text': 'BUY' if r.is_bullish else 'SELL',
-                'reversal_time': r.timestamp if hasattr(r, 'timestamp') else df.index[r.bar_index],
-                'timestamp': r.timestamp if hasattr(r, 'timestamp') else df.index[r.bar_index],
+                'outer_top':    outer_top_val,
+                'outer_bottom': outer_bottom_val,
+                'core_top':     r.price + core_half,
+                'core_bottom':  r.price - core_half,
+                'is_bullish':   r.is_bullish,
+                'label_text':   'BUY' if r.is_bullish else 'SELL',
+                'reversal_time': ts,
+                'timestamp':     ts,
             })
         
         path_segments = []

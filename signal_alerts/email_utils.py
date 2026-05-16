@@ -38,24 +38,24 @@ def send_signal_alert_email(email, username, signal_data):
         sender_email = settings.EMAIL_HOST_USER
         sender_password = settings.EMAIL_HOST_PASSWORD
         
-        # Extract signal data
-        crypto = signal_data.get('crypto', 'N/A')
-        timeframe = signal_data.get('timeframe', 'N/A')
-        signal_type = signal_data.get('signal_type', 'N/A')
-        entry_price = signal_data.get('entry_price', 'N/A')
-        target = signal_data.get('target', 'N/A')
-        timestamp = signal_data.get('timestamp', 'N/A')
-        
-        # Use stop_loss from signal_data if provided (from outer zone boundary)
-        # This is more accurate than calculating from entry/target
-        raw_stop_loss = signal_data.get('stop_loss')
-        if raw_stop_loss and raw_stop_loss not in ('N/A', '', None, 0):
+        # Extract signal data — round all prices to 2 decimal places for clean display
+        crypto       = signal_data.get('crypto', 'N/A')
+        timeframe    = signal_data.get('timeframe', 'N/A')
+        signal_type  = signal_data.get('signal_type', 'N/A')
+        timestamp    = signal_data.get('timestamp', 'N/A')
+
+        # Round prices to 2 decimal places so email matches history page exactly
+        def _fmt_price(val):
             try:
-                stop_loss = f"{float(raw_stop_loss):.2f}"
-            except (ValueError, TypeError):
-                stop_loss = 'N/A'
-        else:
-            stop_loss = 'N/A'
+                return f"{float(val):.2f}"
+            except (TypeError, ValueError):
+                return 'N/A'
+
+        entry_price = _fmt_price(signal_data.get('entry_price'))
+        target      = _fmt_price(signal_data.get('target'))
+
+        raw_stop = signal_data.get('stop_loss')
+        stop_loss = _fmt_price(raw_stop) if raw_stop not in (None, '', 0, 'N/A') else 'N/A'
         
         # Determine signal color and emoji
         if signal_type == 'BUY':

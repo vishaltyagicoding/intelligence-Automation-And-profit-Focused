@@ -258,29 +258,29 @@ _BINANCE_TO_USER_SYMBOL = {
 def _send_signal_notifications(symbol: str, timeframe: str, new_signals: list):
     """
     Send email notifications to paid subscribers for new signals.
-    Converts internal Binance symbol (BTCUSDT) to user-facing symbol (BTCUSD)
-    so it matches SignalAlert.crypto values stored in the database.
+    Converts internal Binance symbol (BTCUSDT) to user-facing symbol (BTCUSD).
     Only sends to users with manual_subscription='activated'.
+
+    CRITICAL: entry/stop_loss/target are rounded to 2 decimal places so the
+    email alert and the history page always show identical values.
     """
     try:
         from signal_alerts.email_utils import notify_signal_subscribers
         import pytz
 
         # Convert Binance format (BTCUSDT) → user-facing format (BTCUSD)
-        # This is the ROOT CAUSE fix — mismatched symbols caused 0 emails sent
         user_symbol = _BINANCE_TO_USER_SYMBOL.get(symbol.upper(), symbol)
 
         for signal_info in new_signals:
             zone = signal_info['zone']
 
             is_bull    = zone.is_bullish
-            entry      = float(zone.center_price)
-            outer_top  = float(zone.outer_top)
-            outer_bot  = float(zone.outer_bottom)
+            entry      = round(float(zone.center_price), 2)
+            outer_top  = round(float(zone.outer_top),    2)
+            outer_bot  = round(float(zone.outer_bottom), 2)
 
-            # Use outer zone boundaries — same as views.py and history page
-            # BUY:  stop_loss = outer_bottom (below zone), target = outer_top (above zone)
-            # SELL: stop_loss = outer_top   (above zone), target = outer_bottom (below zone)
+            # BUY:  stop_loss = outer_bottom (below entry), target = outer_top (above entry)
+            # SELL: stop_loss = outer_top    (above entry), target = outer_bottom (below entry)
             if is_bull:
                 stop_loss = outer_bot
                 target    = outer_top
@@ -304,9 +304,9 @@ def _send_signal_notifications(symbol: str, timeframe: str, new_signals: list):
 
             if notifications_sent > 0:
                 logger.info(
-                    "📧 %d email(s) sent — %s %s %s @ %.4f",
+                    "📧 %d email(s) sent — %s %s %s  Entry=%.2f  SL=%.2f  TP=%.2f",
                     notifications_sent, user_symbol, timeframe,
-                    signal_data['signal_type'], entry
+                    signal_data['signal_type'], entry, stop_loss, target,
                 )
 
     except Exception as e:

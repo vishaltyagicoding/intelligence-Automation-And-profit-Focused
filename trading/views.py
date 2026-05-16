@@ -351,24 +351,22 @@ def get_signal_history(request, symbol):
 
         signals = []
         for rec in filtered:
-            # Calculate stop loss and target using the correct formula
-            is_bull = rec.is_bullish
-            entry = float(rec.center_price)
-            core_top = float(rec.core_top)
-            core_bot = float(rec.core_bottom)
+            is_bull   = rec.is_bullish
+            entry     = round(float(rec.center_price), 2)
+            outer_top = round(float(rec.outer_top),    2)
+            outer_bot = round(float(rec.outer_bottom), 2)
+            core_top  = round(float(rec.core_top),     2)
+            core_bot  = round(float(rec.core_bottom),  2)
 
-            # Use outer zone boundaries for stop_loss and target
-            # This matches exactly what tasks.py sends in email alerts
-            # and gives meaningful risk levels (not nearly identical to entry)
-            outer_top = float(rec.outer_top)
-            outer_bot = float(rec.outer_bottom)
-
-            if is_bull:  # BUY signal
-                stop_loss = outer_bot   # Stop below the outer zone bottom
-                target    = outer_top   # Target at the outer zone top
-            else:  # SELL signal
-                stop_loss = outer_top   # Stop above the outer zone top
-                target    = outer_bot   # Target at the outer zone bottom
+            # BUY:  stop_loss = outer_bottom (below entry), target = outer_top (above entry)
+            # SELL: stop_loss = outer_top    (above entry), target = outer_bottom (below entry)
+            # These match exactly what the email alert sends and the DB stores.
+            if is_bull:
+                stop_loss = outer_bot
+                target    = outer_top
+            else:
+                stop_loss = outer_top
+                target    = outer_bot
 
             signals.append({
                 'bar_index':    rec.bar_index,
@@ -376,8 +374,8 @@ def get_signal_history(request, symbol):
                 'center_price': entry,
                 'stop_loss':    stop_loss,
                 'target':       target,
-                'outer_top':    float(rec.outer_top),
-                'outer_bottom': float(rec.outer_bottom),
+                'outer_top':    outer_top,
+                'outer_bottom': outer_bot,
                 'core_top':     core_top,
                 'core_bottom':  core_bot,
                 'label':        rec.label_text,

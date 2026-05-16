@@ -481,18 +481,22 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
     def _save_signal_to_db(symbol, timeframe, zone):
         """
         Persist a confirmed reversal signal to the ReversalZone table.
-        Uses get_or_create on (symbol, timeframe, bar_index) so the same
-        signal is never stored twice even if the stream reconnects.
-        
-        CRITICAL: Handles database constraint violations gracefully.
-        The database has a trigger that prevents consecutive BUY/SELL signals.
-        If a signal violates alternation, it's logged and skipped (not an error).
+
+        KEY FIX: use update_or_create on (symbol, timeframe, reversal_time)
+        NOT bar_index — bar_index is relative and shifts every API call,
+        causing duplicate rows or stale data.  reversal_time is the stable,
+        canonical identifier for a signal.
+
+        • If the same signal fires again (e.g. stream reconnect) the row is
+          UPDATED with the latest outer_top/outer_bottom (correct SL/Target).
+        • Consecutive BUY/SELL violations are caught by the DB trigger and
+          logged as INFO (not errors) — this is expected alternation enforcement.
         """
         try:
             from reversal_zones.models import ReversalZone
             from django.db import IntegrityError
-            import datetime, pytz
-            
+            import pytz
+
             ts = zone.get("timestamp")
             if isinstance(ts, str):
                 from django.utils.dateparse import parse_datetime
@@ -502,43 +506,50 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             else:
                 reversal_time = ts
 
-            if reversal_time and reversal_time.tzinfo is None:
+            if reversal_time is None:
+                logger.error("_save_signal_to_db: reversal_time is None for zone %s", zone)
+                return
+
+            if reversal_time.tzinfo is None:
                 reversal_time = reversal_time.replace(tzinfo=pytz.UTC)
 
             is_bull = zone.get("is_bullish", True)
-            label = "BUY" if is_bull else "SELL"
+            label   = "BUY" if is_bull else "SELL"
 
-            obj, created = ReversalZone.objects.get_or_create(
-                symbol=symbol,
-                timeframe=timeframe,
-                bar_index=zone.get("bar_index", 0),
+            # ── Use reversal_time as the unique key (stable across restarts) ──
+            obj, created = ReversalZone.objects.update_or_create(
+                symbol        = symbol,
+                timeframe     = timeframe,
+                reversal_time = reversal_time,
                 defaults={
-                    "reversal_time": reversal_time,
                     "center_price":  zone.get("center_price", 0),
-                    "outer_top":     zone.get("outer_top", 0),
+                    "outer_top":     zone.get("outer_top",    0),
                     "outer_bottom":  zone.get("outer_bottom", 0),
-                    "core_top":      zone.get("core_top", 0),
-                    "core_bottom":   zone.get("core_bottom", 0),
+                    "core_top":      zone.get("core_top",     0),
+                    "core_bottom":   zone.get("core_bottom",  0),
                     "is_bullish":    is_bull,
                     "label_text":    label,
+                    "bar_index":     zone.get("bar_index", 0),
                 },
             )
-            if created:
-                logger.info("💾 Saved %s signal to DB: %s %s @ %.2f",
-                            obj.label_text, symbol, timeframe,
-                            float(obj.center_price))
-                            
+            action = "💾 Created" if created else "🔄 Updated"
+            logger.info(
+                "%s %s signal in DB: %s %s @ %.2f  SL=%.2f  TP=%.2f",
+                action, obj.label_text, symbol, timeframe,
+                float(obj.center_price),
+                float(obj.outer_bottom if is_bull else obj.outer_top),
+                float(obj.outer_top    if is_bull else obj.outer_bottom),
+            )
+
         except (IntegrityError, Exception) as exc:
             error_msg = str(exc)
             if "Consecutive" in error_msg and "signals not allowed" in error_msg:
-                # This is EXPECTED behavior - the database constraint is working
                 logger.info(
                     "🛡️ DB CONSTRAINT blocked consecutive %s signal [%s %s] @ %.2f - "
                     "alternation enforced at database level",
                     label, symbol, timeframe, zone.get("center_price", 0)
                 )
             else:
-                # This is an unexpected error - log it
                 logger.error("Error saving signal to DB [%s %s]: %s",
                              symbol, timeframe, exc)
 
@@ -659,6 +670,8 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             # ── Send email alert to paid subscribers who match this asset+timeframe ─
             # This is the LIVE signal path (WebSocket candle close).
             # We run it in a thread pool to avoid blocking the async event loop.
+            # CRITICAL: Prices are rounded to 2dp so email and history page show
+            # identical values (no floating-point formatting mismatch).
             try:
                 import pytz
                 from reversal_zones.tasks import _BINANCE_TO_USER_SYMBOL
@@ -666,22 +679,27 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
 
                 user_sym   = _BINANCE_TO_USER_SYMBOL.get(db_symbol, self.asset)
                 is_bull    = last_zone.get('is_bullish', True)
-                entry      = float(last_zone.get('center_price', 0))
-                outer_top  = float(last_zone.get('outer_top',  entry))
-                outer_bot  = float(last_zone.get('outer_bottom', entry))
+                entry      = round(float(last_zone.get('center_price', 0)), 2)
+                outer_top  = round(float(last_zone.get('outer_top',  entry)), 2)
+                outer_bot  = round(float(last_zone.get('outer_bottom', entry)), 2)
                 ts_obj     = last_zone.get('timestamp') or last_zone.get('reversal_time')
                 if hasattr(ts_obj, 'strftime'):
                     ts_str = ts_obj.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
                 else:
                     ts_str = str(ts_obj)
 
+                # For BUY:  stop_loss = outer_bottom (below entry), target = outer_top (above)
+                # For SELL: stop_loss = outer_top    (above entry), target = outer_bottom (below)
+                email_stop_loss = outer_bot if is_bull else outer_top
+                email_target    = outer_top if is_bull else outer_bot
+
                 email_payload = {
                     'crypto':      user_sym,
                     'timeframe':   self.timeframe,
                     'signal_type': 'BUY' if is_bull else 'SELL',
                     'entry_price': entry,
-                    'stop_loss':   outer_bot if is_bull else outer_top,
-                    'target':      outer_top if is_bull else outer_bot,
+                    'stop_loss':   email_stop_loss,
+                    'target':      email_target,
                     'timestamp':   ts_str,
                 }
 
@@ -693,9 +711,13 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                     lambda: notify_signal_subscribers(email_payload)
                 )
                 if sent:
-                    logger.info("📧 Live signal email: %d sent for %s %s %s",
-                                sent, user_sym, self.timeframe,
-                                email_payload['signal_type'])
+                    logger.info(
+                        "📧 Live signal email: %d sent for %s %s %s  "
+                        "Entry=%.2f  SL=%.2f  TP=%.2f",
+                        sent, user_sym, self.timeframe,
+                        email_payload['signal_type'],
+                        entry, email_stop_loss, email_target,
+                    )
             except Exception as email_exc:
                 logger.error("Email notify error in _emit_live_signal: %s", email_exc)
 

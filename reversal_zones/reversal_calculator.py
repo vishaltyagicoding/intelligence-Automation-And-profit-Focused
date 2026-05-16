@@ -81,27 +81,25 @@ def _professional_sl_target(
     BUY signal
     ----------
     Look backwards from bar_index for the first BEARISH candle (close < open).
-    • Skip doji/flat candles  (|close - open| < 1 real price point)
-    • If the candle only moved 20-30 real points, add 20 extra buffer points
-    • Use candle_low  - 20 real points  as stop loss
-    • If no meaningful bearish candle found, fall back to 1.5× ATR below entry
+    • Skip doji/flat candles  (|close - open| < 0.1% of price)
+    • Use candle_low - (1.5 × ATR) as stop loss
     • Cap stop distance at 3× ATR (avoids unreasonably wide stops)
     • Target = entry + 2× risk  (minimum 2 : 1 Risk : Reward)
 
     SELL signal
     -----------
     Mirror logic using BULLISH candles (close > open).
-    Stop = candle_high + 20 real points.
+    Stop = candle_high + (1.5 × ATR).
     Target = entry − 2× risk.
 
-    "Real points" means whole integer price units (e.g. $20 for BTC, not $0.20).
+    This ensures realistic stop loss and target values for ALL asset prices.
     """
-    BUFFER          = 20    # buffer in whole price units appended below/above SL candle
-    SMALL_THRESHOLD = 30    # candle body ≤ 30 whole units  → "small candle" extra buffer
-    ATR_MIN_MULT    = 1.5   # minimum SL distance = 1.5 × ATR
-    ATR_MAX_MULT    = 3.0   # cap SL distance at  3.0 × ATR
+    ATR_BUFFER_MULT = 1.5   # buffer = 1.5 × ATR below/above swing candle
+    ATR_MIN_MULT    = 2.0   # minimum SL distance = 2.0 × ATR
+    ATR_MAX_MULT    = 4.0   # cap SL distance at  4.0 × ATR
     RR_RATIO        = 2.0   # profit target = risk × 2
     LOOKBACK        = 30    # max candles to look back
+    DOJI_THRESHOLD  = 0.001 # candle body < 0.1% of price = doji
 
     n           = len(df)
     look_start  = max(0, bar_index - LOOKBACK)
@@ -119,18 +117,15 @@ def _professional_sl_target(
             if c >= o:
                 continue   # not a bearish candle
 
-            body = o - c   # whole price units moved down
+            body_pct = abs(o - c) / o if o > 0 else 0
 
-            if body < 1.0:
-                # Same-to-same price (doji) — skip, look further back
+            if body_pct < DOJI_THRESHOLD:
+                # Doji (body < 0.1% of price) — skip, look further back
                 continue
 
-            if body <= SMALL_THRESHOLD:
-                # Small candle: only moved 20-30 pts → use low then add 20 extra
-                sl_level = low - BUFFER
-            else:
-                # Significant bearish candle → use its low with normal buffer
-                sl_level = low - BUFFER
+            # Found meaningful bearish candle
+            # Use its low minus 1.5× ATR as stop loss
+            sl_level = low - (atr_now * ATR_BUFFER_MULT)
             break
 
         if sl_level is None:
@@ -142,7 +137,7 @@ def _professional_sl_target(
         atr_max_sl = center_price - (atr_now * ATR_MAX_MULT)
 
         stop_loss = min(sl_level, atr_min_sl)  # take the lower (more protection)
-        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 3× ATR
+        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 4× ATR
 
         # ── Target: 2 : 1 R : R ──────────────────────────────────────────
         risk   = center_price - stop_loss
@@ -162,15 +157,14 @@ def _professional_sl_target(
             if c <= o:
                 continue   # not a bullish candle
 
-            body = c - o   # whole price units moved up
+            body_pct = abs(c - o) / o if o > 0 else 0
 
-            if body < 1.0:
+            if body_pct < DOJI_THRESHOLD:
                 continue   # doji – skip
 
-            if body <= SMALL_THRESHOLD:
-                sl_level = high + BUFFER
-            else:
-                sl_level = high + BUFFER
+            # Found meaningful bullish candle
+            # Use its high plus 1.5× ATR as stop loss
+            sl_level = high + (atr_now * ATR_BUFFER_MULT)
             break
 
         if sl_level is None:
@@ -181,7 +175,7 @@ def _professional_sl_target(
         atr_max_sl = center_price + (atr_now * ATR_MAX_MULT)
 
         stop_loss = max(sl_level, atr_min_sl)  # take the higher (more protection)
-        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 3× ATR
+        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 4× ATR
 
         # ── Target: 2 : 1 R : R ──────────────────────────────────────────
         risk   = stop_loss - center_price

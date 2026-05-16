@@ -358,9 +358,10 @@ def get_signal_history(request, symbol):
             core_top  = round(float(rec.core_top),     2)
             core_bot  = round(float(rec.core_bottom),  2)
 
-            # BUY:  stop_loss = outer_bottom (below entry), target = outer_top (above entry)
-            # SELL: stop_loss = outer_top    (above entry), target = outer_bottom (below entry)
-            # These match exactly what the email alert sends and the DB stores.
+            # PRODUCTION LOGIC: Use outer_top/outer_bottom which now contain
+            # realistic stop loss and target values (2% SL, 4% TP)
+            # BUY:  stop_loss = outer_bottom (2% below entry), target = outer_top (4% above entry)
+            # SELL: stop_loss = outer_top (2% above entry), target = outer_bottom (4% below entry)
             if is_bull:
                 stop_loss = outer_bot
                 target    = outer_top

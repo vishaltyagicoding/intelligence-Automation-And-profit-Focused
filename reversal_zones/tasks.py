@@ -261,8 +261,11 @@ def _send_signal_notifications(symbol: str, timeframe: str, new_signals: list):
     Converts internal Binance symbol (BTCUSDT) to user-facing symbol (BTCUSD).
     Only sends to users with manual_subscription='activated'.
 
-    CRITICAL: entry/stop_loss/target are rounded to 2 decimal places so the
-    email alert and the history page always show identical values.
+    CRITICAL: Uses professional stop loss & target from reversal_calculator.py:
+    - BUY:  stop_loss = outer_bottom (swing-based SL), target = outer_top (2:1 R:R)
+    - SELL: stop_loss = outer_top (swing-based SL), target = outer_bottom (2:1 R:R)
+    
+    Email alert and history page MUST show identical values (same price, same time).
     """
     try:
         from signal_alerts.email_utils import notify_signal_subscribers
@@ -274,13 +277,14 @@ def _send_signal_notifications(symbol: str, timeframe: str, new_signals: list):
         for signal_info in new_signals:
             zone = signal_info['zone']
 
-            is_bull    = zone.is_bullish
-            entry      = round(float(zone.center_price), 2)
-            outer_top  = round(float(zone.outer_top),    2)
-            outer_bot  = round(float(zone.outer_bottom), 2)
+            is_bull   = zone.is_bullish
+            entry     = round(float(zone.center_price), 2)
+            outer_top = round(float(zone.outer_top),    2)
+            outer_bot = round(float(zone.outer_bottom), 2)
 
+            # Professional stop loss & target (calculated by reversal_calculator.py)
             # BUY:  stop_loss = outer_bottom (below entry), target = outer_top (above entry)
-            # SELL: stop_loss = outer_top    (above entry), target = outer_bottom (below entry)
+            # SELL: stop_loss = outer_top (above entry), target = outer_bottom (below entry)
             if is_bull:
                 stop_loss = outer_bot
                 target    = outer_top

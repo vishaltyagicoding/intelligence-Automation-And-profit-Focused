@@ -77,30 +77,22 @@ def _professional_sl_target(
     timeframe: str = '5m',
 ) -> tuple[float, float]:
     """
-    Professional stop loss & target based on swing-candle structure + timeframe.
+    Professional stop loss & target based on swing-candle structure.
 
-    Uses ATR-based calculation with timeframe-specific minimum distances to ensure
-    realistic stop loss and target values for production algo trading.
-
-    Timeframe-based minimums:
-    - 5m: 1.5% SL, 3.0% TP
-    - 15m, 30m: 1.0% SL, 2.0% TP
-    - 1h, 2h: 0.8% SL, 1.6% TP
-    - 4h, 1d: 0.5% SL, 1.0% TP
+    LOGIC:
+    - BUY signal → scans backwards to find first bearish (red) candle
+      Skips doji/flat candles. Uses candle_low − 20 as stop loss.
+      If candle moved < 30 points, adds 20 extra buffer.
+    - SELL signal → mirror logic — finds first bullish (green) candle,
+      uses candle_high + 20 as stop loss.
+    - Target = always minimum 2:1 Risk:Reward (entry + 2 × risk for BUY)
+    - ATR safety guards: minimum 1.5× ATR distance, cap at 3× ATR
     """
-    # Timeframe-based minimum stop loss percentages
-    TF_MIN_SL_PCT = {
-        '5m': 0.015,
-        '15m': 0.010, '30m': 0.010,
-        '1h': 0.008, '2h': 0.008,
-        '4h': 0.005, '1d': 0.005,
-    }
-    
-    min_sl_pct = TF_MIN_SL_PCT.get(timeframe, 0.010)  # Default 1.0%
-    
-    ATR_BUFFER_MULT = 1.5   # buffer = 1.5 × ATR below/above swing candle
-    ATR_MIN_MULT    = 2.0   # minimum SL distance = 2.0 × ATR
-    ATR_MAX_MULT    = 5.0   # cap SL distance at  5.0 × ATR
+    BUFFER_POINTS   = 20.0  # fixed buffer in real price points
+    SMALL_MOVE      = 30.0  # if candle moved < 30 points, add extra buffer
+    EXTRA_BUFFER    = 20.0  # extra buffer for small-move candles
+    ATR_MIN_MULT    = 1.5   # minimum SL distance = 1.5 × ATR
+    ATR_MAX_MULT    = 3.0   # cap SL distance at 3.0 × ATR
     RR_RATIO        = 2.0   # profit target = risk × 2
     LOOKBACK        = 30    # max candles to look back
     DOJI_THRESHOLD  = 0.001 # candle body < 0.1% of price = doji
@@ -128,26 +120,32 @@ def _professional_sl_target(
                 continue
 
             # Found meaningful bearish candle
-            # Use its low minus 1.5× ATR as stop loss
-            sl_level = low - (atr_now * ATR_BUFFER_MULT)
+            candle_move = abs(o - c)  # real price points moved
+            
+            # Base stop loss: candle_low - 20 points
+            sl_level = low - BUFFER_POINTS
+            
+            # If candle only moved 20-30 points, add 20 extra buffer
+            if candle_move < SMALL_MOVE:
+                sl_level -= EXTRA_BUFFER
+            
             break
 
         if sl_level is None:
             # No suitable bearish candle found – ATR fallback
             sl_level = center_price - (atr_now * ATR_MIN_MULT)
 
-        # ── Enforce minimum stop loss distance based on timeframe ────────
-        min_sl_distance = center_price * min_sl_pct
-        atr_min_sl = center_price - max(atr_now * ATR_MIN_MULT, min_sl_distance)
+        # ── ATR safety guards ────────────────────────────────────────────
+        atr_min_sl = center_price - (atr_now * ATR_MIN_MULT)
         atr_max_sl = center_price - (atr_now * ATR_MAX_MULT)
 
         stop_loss = min(sl_level, atr_min_sl)  # take the lower (more protection)
-        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 5× ATR
+        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 3× ATR
 
         # ── Target: 2 : 1 R : R ──────────────────────────────────────────
         risk   = center_price - stop_loss
         if risk <= 0:
-            risk = max(atr_now * ATR_MIN_MULT, min_sl_distance)
+            risk = atr_now * ATR_MIN_MULT
         target = center_price + (risk * RR_RATIO)
 
     else:
@@ -168,25 +166,31 @@ def _professional_sl_target(
                 continue   # doji – skip
 
             # Found meaningful bullish candle
-            # Use its high plus 1.5× ATR as stop loss
-            sl_level = high + (atr_now * ATR_BUFFER_MULT)
+            candle_move = abs(c - o)  # real price points moved
+            
+            # Base stop loss: candle_high + 20 points
+            sl_level = high + BUFFER_POINTS
+            
+            # If candle only moved 20-30 points, add 20 extra buffer
+            if candle_move < SMALL_MOVE:
+                sl_level += EXTRA_BUFFER
+            
             break
 
         if sl_level is None:
             sl_level = center_price + (atr_now * ATR_MIN_MULT)
 
-        # ── Enforce minimum stop loss distance based on timeframe ────────
-        min_sl_distance = center_price * min_sl_pct
-        atr_min_sl = center_price + max(atr_now * ATR_MIN_MULT, min_sl_distance)
+        # ── ATR safety guards ────────────────────────────────────────────
+        atr_min_sl = center_price + (atr_now * ATR_MIN_MULT)
         atr_max_sl = center_price + (atr_now * ATR_MAX_MULT)
 
         stop_loss = max(sl_level, atr_min_sl)  # take the higher (more protection)
-        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 5× ATR
+        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 3× ATR
 
         # ── Target: 2 : 1 R : R ──────────────────────────────────────────
         risk   = stop_loss - center_price
         if risk <= 0:
-            risk = max(atr_now * ATR_MIN_MULT, min_sl_distance)
+            risk = atr_now * ATR_MIN_MULT
         target = center_price - (risk * RR_RATIO)
 
     return float(stop_loss), float(target)

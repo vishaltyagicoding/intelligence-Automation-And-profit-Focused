@@ -281,7 +281,8 @@ class Command(BaseCommand):
             closest_idx = time_diffs.argmin()
             
             # Verify it's within reasonable range (1 hour)
-            if time_diffs.iloc[closest_idx].total_seconds() > 3600:
+            # time_diffs is a TimedeltaIndex, use [closest_idx] not .iloc[]
+            if time_diffs[closest_idx].total_seconds() > 3600:
                 return None
             
             return closest_idx

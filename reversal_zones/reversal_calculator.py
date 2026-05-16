@@ -80,24 +80,28 @@ def _professional_sl_target(
     Professional stop loss & target for real algo trading.
 
     LOGIC:
-    - Stop Loss: Scan backwards to find first bearish/bullish candle, use its low/high
-    - Target: MINIMUM 7% profit target for all symbols (real trading requirement)
-    - Skip doji candles (body < 0.1% of price)
-    - ATR safety guards: minimum 1.5× ATR, cap at 5× ATR
+    - Stop Loss BUY: Find previous GREEN candle where LOW < current signal LOW, then -0.5%
+    - Stop Loss SELL: Find previous RED candle where HIGH > current signal HIGH, then +0.5%
+    - Target: MINIMUM 2.5% profit (realistic for crypto trading)
+    - Risk-Reward: 2.5:1 ratio
     """
     # ── Constants ────────────────────────────────────────────────────────
-    MIN_TARGET_PCT  = 0.07      # MINIMUM 7% target for real trading
-    ATR_MIN_MULT    = 1.5       # minimum SL distance = 1.5 × ATR
-    ATR_MAX_MULT    = 5.0       # cap SL distance at 5.0 × ATR
+    MIN_TARGET_PCT  = 0.025     # MINIMUM 2.5% target for real trading
+    SL_BUFFER_PCT   = 0.005     # 0.5% buffer below/above swing point
+    RISK_REWARD     = 2.5       # 2.5:1 risk-reward ratio
     LOOKBACK        = 50        # max candles to look back
     DOJI_THRESHOLD  = 0.001     # candle body < 0.1% of price = doji
 
     n           = len(df)
     look_start  = max(0, bar_index - LOOKBACK)
     sl_level    = None
+    
+    # Get current signal candle's low/high
+    current_low  = float(df['low'].iloc[bar_index])
+    current_high = float(df['high'].iloc[bar_index])
 
     if is_bullish:
-        # ── BUY: find previous bearish (red) candle ──────────────────────
+        # ── BUY: Find previous GREEN candle where LOW < current signal LOW ──
         for i in range(bar_index - 1, look_start - 1, -1):
             if i < 0 or i >= n:
                 continue
@@ -105,47 +109,42 @@ def _professional_sl_target(
             c   = float(df['close'].iloc[i])
             low = float(df['low'].iloc[i])
 
-            if c >= o:
-                continue   # not a bearish candle
-
-            body_pct = abs(o - c) / o if o > 0 else 0
-
-            if body_pct < DOJI_THRESHOLD:
-                # Doji (body < 0.1% of price) — skip, look further back
+            # Must be a GREEN candle (close > open)
+            if c <= o:
                 continue
 
-            # Found meaningful bearish candle - use its LOW as stop loss base
-            sl_level = low
-            break
+            body_pct = abs(c - o) / o if o > 0 else 0
+            if body_pct < DOJI_THRESHOLD:
+                continue  # skip doji
+
+            # Check if this candle's LOW is BELOW current signal's LOW
+            if low < current_low:
+                # Found it! Use this LOW and subtract 0.5% buffer
+                sl_level = low * (1 - SL_BUFFER_PCT)
+                break
 
         if sl_level is None:
-            # No suitable bearish candle found – ATR fallback
-            sl_level = center_price - (atr_now * ATR_MIN_MULT)
+            # Fallback: use current candle's low - 0.5%
+            sl_level = current_low * (1 - SL_BUFFER_PCT)
 
-        # ── ATR safety guards ────────────────────────────────────────────
-        atr_min_sl = center_price - (atr_now * ATR_MIN_MULT)
-        atr_max_sl = center_price - (atr_now * ATR_MAX_MULT)
+        stop_loss = sl_level
 
-        stop_loss = min(sl_level, atr_min_sl)  # take the lower (more protection)
-        stop_loss = max(stop_loss, atr_max_sl)  # cap: don't go beyond 5× ATR
-
-        # ── Target: MINIMUM 7% profit ────────────────────────────────────
-        # Calculate risk
+        # ── Target: MINIMUM 2.5% profit ──────────────────────────────────
         risk = center_price - stop_loss
         if risk <= 0:
-            risk = atr_now * ATR_MIN_MULT
-        
-        # Calculate minimum 7% target (MANDATORY for real trading)
+            risk = center_price * 0.005  # 0.5% fallback
+
+        # Calculate minimum 2.5% target
         min_target = center_price * (1 + MIN_TARGET_PCT)
         
-        # Use 3:1 risk-reward for better profit potential
-        rr_target = center_price + (risk * 3.0)
+        # Calculate risk-reward target (2.5:1)
+        rr_target = center_price + (risk * RISK_REWARD)
         
-        # ALWAYS take the HIGHER of the two (ensures minimum 7% profit)
+        # Take the HIGHER (ensures minimum 2.5% profit)
         target = max(min_target, rr_target)
 
     else:
-        # ── SELL: find previous bullish (green) candle ────────────────────
+        # ── SELL: Find previous RED candle where HIGH > current signal HIGH ──
         for i in range(bar_index - 1, look_start - 1, -1):
             if i < 0 or i >= n:
                 continue
@@ -153,41 +152,38 @@ def _professional_sl_target(
             c    = float(df['close'].iloc[i])
             high = float(df['high'].iloc[i])
 
-            if c <= o:
-                continue   # not a bullish candle
+            # Must be a RED candle (close < open)
+            if c >= o:
+                continue
 
-            body_pct = abs(c - o) / o if o > 0 else 0
-
+            body_pct = abs(o - c) / o if o > 0 else 0
             if body_pct < DOJI_THRESHOLD:
-                continue   # doji – skip
+                continue  # skip doji
 
-            # Found meaningful bullish candle - use its HIGH as stop loss base
-            sl_level = high
-            break
+            # Check if this candle's HIGH is ABOVE current signal's HIGH
+            if high > current_high:
+                # Found it! Use this HIGH and add 0.5% buffer
+                sl_level = high * (1 + SL_BUFFER_PCT)
+                break
 
         if sl_level is None:
-            sl_level = center_price + (atr_now * ATR_MIN_MULT)
+            # Fallback: use current candle's high + 0.5%
+            sl_level = current_high * (1 + SL_BUFFER_PCT)
 
-        # ── ATR safety guards ────────────────────────────────────────────
-        atr_min_sl = center_price + (atr_now * ATR_MIN_MULT)
-        atr_max_sl = center_price + (atr_now * ATR_MAX_MULT)
+        stop_loss = sl_level
 
-        stop_loss = max(sl_level, atr_min_sl)  # take the higher (more protection)
-        stop_loss = min(stop_loss, atr_max_sl)  # cap: don't go beyond 5× ATR
-
-        # ── Target: MINIMUM 7% profit ────────────────────────────────────
-        # Calculate risk
+        # ── Target: MINIMUM 2.5% profit ──────────────────────────────────
         risk = stop_loss - center_price
         if risk <= 0:
-            risk = atr_now * ATR_MIN_MULT
-        
-        # Calculate minimum 7% target (7% DOWN from entry for SELL - MANDATORY)
+            risk = center_price * 0.005  # 0.5% fallback
+
+        # Calculate minimum 2.5% target (2.5% DOWN from entry)
         min_target = center_price * (1 - MIN_TARGET_PCT)
         
-        # Use 3:1 risk-reward for better profit potential
-        rr_target = center_price - (risk * 3.0)
+        # Calculate risk-reward target (2.5:1)
+        rr_target = center_price - (risk * RISK_REWARD)
         
-        # ALWAYS take the LOWER of the two (ensures minimum 7% profit down)
+        # Take the LOWER (ensures minimum 2.5% profit down)
         target = min(min_target, rr_target)
 
     # Round to 2 decimal places for consistency

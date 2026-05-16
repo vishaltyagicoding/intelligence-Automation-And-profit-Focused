@@ -358,16 +358,19 @@ def get_signal_history(request, symbol):
             core_top  = round(float(rec.core_top),     2)
             core_bot  = round(float(rec.core_bottom),  2)
 
-            # PRODUCTION LOGIC: Use outer_top/outer_bottom which now contain
-            # realistic stop loss and target values (2% SL, 4% TP)
-            # BUY:  stop_loss = outer_bottom (2% below entry), target = outer_top (4% above entry)
-            # SELL: stop_loss = outer_top (2% above entry), target = outer_bottom (4% below entry)
-            if is_bull:
-                stop_loss = outer_bot
-                target    = outer_top
+            # NEW: Use the dedicated stop_loss and target fields if available
+            # This ensures history API shows the universal calculation values
+            if rec.stop_loss and rec.target:
+                stop_loss = round(float(rec.stop_loss), 2)
+                target    = round(float(rec.target), 2)
             else:
-                stop_loss = outer_top
-                target    = outer_bot
+                # Fallback to outer_top/outer_bottom for old records
+                if is_bull:
+                    stop_loss = outer_bot
+                    target    = outer_top
+                else:
+                    stop_loss = outer_top
+                    target    = outer_bot
 
             signals.append({
                 'bar_index':    rec.bar_index,

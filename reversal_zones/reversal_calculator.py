@@ -77,25 +77,40 @@ def _professional_sl_target(
     timeframe: str = '5m',
 ) -> tuple[float, float]:
     """
-    Professional stop loss & target based on swing-candle structure.
+    Universal stop loss & target calculation that adapts to symbol price levels.
 
     LOGIC:
+    - High-priced symbols (price > $1000): Use absolute point-based buffers
+    - Low-priced symbols (price ≤ $1000): Use percentage-based buffers
     - BUY signal → scans backwards to find first bearish (red) candle
-      Skips doji/flat candles. Uses candle_low − 20 as stop loss.
-      If candle moved < 30 points, adds 20 extra buffer.
-    - SELL signal → mirror logic — finds first bullish (green) candle,
-      uses candle_high + 20 as stop loss.
-    - Target = always minimum 2:1 Risk:Reward (entry + 2 × risk for BUY)
+    - SELL signal → finds first bullish (green) candle
+    - Skips doji/flat candles (body < 0.01% of price)
+    - Target = always 2:1 Risk:Reward (entry + 2 × risk for BUY)
     - ATR safety guards: minimum 1.5× ATR distance, cap at 3× ATR
     """
-    BUFFER_POINTS   = 20.0  # fixed buffer in real price points
-    SMALL_MOVE      = 30.0  # if candle moved < 30 points, add extra buffer
-    EXTRA_BUFFER    = 20.0  # extra buffer for small-move candles
+    # ── Universal Constants ──────────────────────────────────────────────
+    HIGH_PRICE_THRESHOLD = 1000.0  # symbols > $1000 use absolute points
+    
+    # High-priced symbol constants (absolute points)
+    BUFFER_POINTS_HIGH   = 20.0    # fixed buffer in real price points
+    SMALL_MOVE_HIGH      = 20.0    # if candle moved < 20 points
+    MEDIUM_MOVE_HIGH     = 30.0    # if candle moved 20-30 points
+    EXTRA_BUFFER_HIGH    = 20.0    # extra buffer for small/medium moves
+    
+    # Low-priced symbol constants (percentages)
+    BUFFER_PCT_LOW       = 0.0003  # 0.03% buffer
+    SMALL_MOVE_PCT_LOW   = 0.0002  # if candle moved < 0.02%
+    MEDIUM_MOVE_PCT_LOW  = 0.0005  # if candle moved 0.02%-0.05%
+    
+    # Common constants
     ATR_MIN_MULT    = 1.5   # minimum SL distance = 1.5 × ATR
     ATR_MAX_MULT    = 3.0   # cap SL distance at 3.0 × ATR
     RR_RATIO        = 2.0   # profit target = risk × 2
     LOOKBACK        = 30    # max candles to look back
-    DOJI_THRESHOLD  = 0.001 # candle body < 0.1% of price = doji
+    DOJI_THRESHOLD  = 0.0001 # candle body < 0.01% of price = doji
+
+    # Determine if high-priced or low-priced symbol
+    is_high_priced = center_price > HIGH_PRICE_THRESHOLD
 
     n           = len(df)
     look_start  = max(0, bar_index - LOOKBACK)
@@ -116,18 +131,40 @@ def _professional_sl_target(
             body_pct = abs(o - c) / o if o > 0 else 0
 
             if body_pct < DOJI_THRESHOLD:
-                # Doji (body < 0.1% of price) — skip, look further back
+                # Doji (body < 0.01% of price) — skip, look further back
                 continue
 
             # Found meaningful bearish candle
             candle_move = abs(o - c)  # real price points moved
             
-            # Base stop loss: candle_low - 20 points
-            sl_level = low - BUFFER_POINTS
-            
-            # If candle only moved 20-30 points, add 20 extra buffer
-            if candle_move < SMALL_MOVE:
-                sl_level -= EXTRA_BUFFER
+            if is_high_priced:
+                # ── HIGH-PRICED SYMBOL: Absolute point-based buffer ──────
+                if SMALL_MOVE_HIGH <= candle_move <= MEDIUM_MOVE_HIGH:
+                    # Candle moved 20-30 points → add 20 extra buffer
+                    buffer = candle_move + EXTRA_BUFFER_HIGH
+                elif candle_move < SMALL_MOVE_HIGH:
+                    # Candle moved < 20 points → add 20 extra buffer
+                    buffer = candle_move + EXTRA_BUFFER_HIGH
+                else:
+                    # Candle moved > 30 points → use move as buffer
+                    buffer = candle_move
+                
+                sl_level = low - buffer
+            else:
+                # ── LOW-PRICED SYMBOL: Percentage-based buffer ───────────
+                move_pct = candle_move / center_price
+                
+                if SMALL_MOVE_PCT_LOW <= move_pct <= MEDIUM_MOVE_PCT_LOW:
+                    # Candle moved 0.02%-0.05% → add 0.03% buffer
+                    buffer = candle_move + (center_price * BUFFER_PCT_LOW)
+                elif move_pct < SMALL_MOVE_PCT_LOW:
+                    # Candle moved < 0.02% → add 0.03% buffer
+                    buffer = candle_move + (center_price * BUFFER_PCT_LOW)
+                else:
+                    # Candle moved > 0.05% → use move as buffer
+                    buffer = candle_move
+                
+                sl_level = low - buffer
             
             break
 
@@ -168,12 +205,34 @@ def _professional_sl_target(
             # Found meaningful bullish candle
             candle_move = abs(c - o)  # real price points moved
             
-            # Base stop loss: candle_high + 20 points
-            sl_level = high + BUFFER_POINTS
-            
-            # If candle only moved 20-30 points, add 20 extra buffer
-            if candle_move < SMALL_MOVE:
-                sl_level += EXTRA_BUFFER
+            if is_high_priced:
+                # ── HIGH-PRICED SYMBOL: Absolute point-based buffer ──────
+                if SMALL_MOVE_HIGH <= candle_move <= MEDIUM_MOVE_HIGH:
+                    # Candle moved 20-30 points → add 20 extra buffer
+                    buffer = candle_move + EXTRA_BUFFER_HIGH
+                elif candle_move < SMALL_MOVE_HIGH:
+                    # Candle moved < 20 points → add 20 extra buffer
+                    buffer = candle_move + EXTRA_BUFFER_HIGH
+                else:
+                    # Candle moved > 30 points → use move as buffer
+                    buffer = candle_move
+                
+                sl_level = high + buffer
+            else:
+                # ── LOW-PRICED SYMBOL: Percentage-based buffer ───────────
+                move_pct = candle_move / center_price
+                
+                if SMALL_MOVE_PCT_LOW <= move_pct <= MEDIUM_MOVE_PCT_LOW:
+                    # Candle moved 0.02%-0.05% → add 0.03% buffer
+                    buffer = candle_move + (center_price * BUFFER_PCT_LOW)
+                elif move_pct < SMALL_MOVE_PCT_LOW:
+                    # Candle moved < 0.02% → add 0.03% buffer
+                    buffer = candle_move + (center_price * BUFFER_PCT_LOW)
+                else:
+                    # Candle moved > 0.05% → use move as buffer
+                    buffer = candle_move
+                
+                sl_level = high + buffer
             
             break
 
@@ -192,6 +251,10 @@ def _professional_sl_target(
         if risk <= 0:
             risk = atr_now * ATR_MIN_MULT
         target = center_price - (risk * RR_RATIO)
+
+    # Round to 2 decimal places for consistency
+    stop_loss = round(stop_loss, 2)
+    target = round(target, 2)
 
     return float(stop_loss), float(target)
 
@@ -442,6 +505,8 @@ class ReversalZoneCalculator:
             zones.append({
                 'bar_index':    r.bar_index,
                 'center_price': r.price,
+                'stop_loss':    stop_loss,      # Add explicit stop_loss field
+                'target':       target,         # Add explicit target field
                 'outer_top':    outer_top_val,
                 'outer_bottom': outer_bottom_val,
                 'core_top':     r.price + core_half,

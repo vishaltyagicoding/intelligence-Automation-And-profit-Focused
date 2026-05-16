@@ -523,6 +523,8 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                 reversal_time = reversal_time,
                 defaults={
                     "center_price":  zone.get("center_price", 0),
+                    "stop_loss":     zone.get("stop_loss"),      # NEW: Save calculated stop_loss
+                    "target":        zone.get("target"),         # NEW: Save calculated target
                     "outer_top":     zone.get("outer_top",    0),
                     "outer_bottom":  zone.get("outer_bottom", 0),
                     "core_top":      zone.get("core_top",     0),
@@ -533,12 +535,17 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                 },
             )
             action = "💾 Created" if created else "🔄 Updated"
+            
+            # Use the new stop_loss and target fields if available, fallback to outer_top/outer_bottom
+            db_stop_loss = float(obj.stop_loss) if obj.stop_loss else float(obj.outer_bottom if is_bull else obj.outer_top)
+            db_target = float(obj.target) if obj.target else float(obj.outer_top if is_bull else obj.outer_bottom)
+            
             logger.info(
                 "%s %s signal in DB: %s %s @ %.2f  SL=%.2f  TP=%.2f",
                 action, obj.label_text, symbol, timeframe,
                 float(obj.center_price),
-                float(obj.outer_bottom if is_bull else obj.outer_top),
-                float(obj.outer_top    if is_bull else obj.outer_bottom),
+                db_stop_loss,
+                db_target,
             )
 
         except (IntegrityError, Exception) as exc:
@@ -670,28 +677,51 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             # ── Send email alert to paid subscribers who match this asset+timeframe ─
             # This is the LIVE signal path (WebSocket candle close).
             # We run it in a thread pool to avoid blocking the async event loop.
-            # CRITICAL: Prices are rounded to 2dp so email and history page show
-            # identical values (no floating-point formatting mismatch).
+            # CRITICAL: Read stop_loss and target from DATABASE (not recalculate)
+            # to ensure email alerts show identical values to history page.
             try:
                 import pytz
                 from reversal_zones.tasks import _BINANCE_TO_USER_SYMBOL
+                from reversal_zones.models import ReversalZone
                 from signal_alerts.email_utils import notify_signal_subscribers
 
                 user_sym   = _BINANCE_TO_USER_SYMBOL.get(db_symbol, self.asset)
                 is_bull    = last_zone.get('is_bullish', True)
                 entry      = round(float(last_zone.get('center_price', 0)), 2)
-                outer_top  = round(float(last_zone.get('outer_top',  entry)), 2)
-                outer_bot  = round(float(last_zone.get('outer_bottom', entry)), 2)
+                
+                # NEW: Read stop_loss and target from the saved database record
+                # This ensures email alerts show EXACTLY the same values as history page
+                try:
+                    from asgiref.sync import sync_to_async
+                    reversal_time = last_zone.get('timestamp') or last_zone.get('reversal_time')
+                    db_record = await sync_to_async(ReversalZone.objects.filter(
+                        symbol=db_symbol,
+                        timeframe=self.timeframe,
+                        reversal_time=reversal_time
+                    ).first)()
+                    
+                    if db_record and db_record.stop_loss and db_record.target:
+                        # Use the new stop_loss and target fields from database
+                        email_stop_loss = round(float(db_record.stop_loss), 2)
+                        email_target = round(float(db_record.target), 2)
+                    else:
+                        # Fallback to outer_top/outer_bottom if new fields not available
+                        outer_top  = round(float(last_zone.get('outer_top',  entry)), 2)
+                        outer_bot  = round(float(last_zone.get('outer_bottom', entry)), 2)
+                        email_stop_loss = outer_bot if is_bull else outer_top
+                        email_target    = outer_top if is_bull else outer_bot
+                except Exception as e:
+                    logger.warning(f"Failed to read stop_loss/target from DB: {e}, using fallback")
+                    outer_top  = round(float(last_zone.get('outer_top',  entry)), 2)
+                    outer_bot  = round(float(last_zone.get('outer_bottom', entry)), 2)
+                    email_stop_loss = outer_bot if is_bull else outer_top
+                    email_target    = outer_top if is_bull else outer_bot
+                
                 ts_obj     = last_zone.get('timestamp') or last_zone.get('reversal_time')
                 if hasattr(ts_obj, 'strftime'):
                     ts_str = ts_obj.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
                 else:
                     ts_str = str(ts_obj)
-
-                # For BUY:  stop_loss = outer_bottom (below entry), target = outer_top (above)
-                # For SELL: stop_loss = outer_top    (above entry), target = outer_bottom (below)
-                email_stop_loss = outer_bot if is_bull else outer_top
-                email_target    = outer_top if is_bull else outer_bot
 
                 email_payload = {
                     'crypto':      user_sym,

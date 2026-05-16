@@ -7,6 +7,8 @@ class ReversalZone(models.Model):
     timeframe = models.CharField(max_length=10, default='4h')  # ADDED MISSING FIELD
     reversal_time = models.DateTimeField()
     center_price = models.DecimalField(max_digits=20, decimal_places=8)
+    stop_loss = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)  # NEW: Universal stop loss
+    target = models.DecimalField(max_digits=20, decimal_places=8, null=True, blank=True)     # NEW: Universal target
     outer_top = models.DecimalField(max_digits=20, decimal_places=8)
     outer_bottom = models.DecimalField(max_digits=20, decimal_places=8)
     core_top = models.DecimalField(max_digits=20, decimal_places=8)

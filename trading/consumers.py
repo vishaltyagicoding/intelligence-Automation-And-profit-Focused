@@ -674,82 +674,10 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             db_symbol = self.binance_symbol.upper()
             await self._save_signal_to_db(db_symbol, self.timeframe, last_zone)
 
-            # ── Send email alert to paid subscribers who match this asset+timeframe ─
-            # This is the LIVE signal path (WebSocket candle close).
-            # We run it in a thread pool to avoid blocking the async event loop.
-            # CRITICAL: Read stop_loss and target from DATABASE (not recalculate)
-            # to ensure email alerts show identical values to history page.
-            try:
-                import pytz
-                from reversal_zones.tasks import _BINANCE_TO_USER_SYMBOL
-                from reversal_zones.models import ReversalZone
-                from signal_alerts.email_utils import notify_signal_subscribers
-
-                user_sym   = _BINANCE_TO_USER_SYMBOL.get(db_symbol, self.asset)
-                is_bull    = last_zone.get('is_bullish', True)
-                entry      = round(float(last_zone.get('center_price', 0)), 2)
-                
-                # NEW: Read stop_loss and target from the saved database record
-                # This ensures email alerts show EXACTLY the same values as history page
-                try:
-                    from asgiref.sync import sync_to_async
-                    reversal_time = last_zone.get('timestamp') or last_zone.get('reversal_time')
-                    db_record = await sync_to_async(ReversalZone.objects.filter(
-                        symbol=db_symbol,
-                        timeframe=self.timeframe,
-                        reversal_time=reversal_time
-                    ).first)()
-                    
-                    if db_record and db_record.stop_loss and db_record.target:
-                        # Use the new stop_loss and target fields from database
-                        email_stop_loss = round(float(db_record.stop_loss), 2)
-                        email_target = round(float(db_record.target), 2)
-                    else:
-                        # Fallback to outer_top/outer_bottom if new fields not available
-                        outer_top  = round(float(last_zone.get('outer_top',  entry)), 2)
-                        outer_bot  = round(float(last_zone.get('outer_bottom', entry)), 2)
-                        email_stop_loss = outer_bot if is_bull else outer_top
-                        email_target    = outer_top if is_bull else outer_bot
-                except Exception as e:
-                    logger.warning(f"Failed to read stop_loss/target from DB: {e}, using fallback")
-                    outer_top  = round(float(last_zone.get('outer_top',  entry)), 2)
-                    outer_bot  = round(float(last_zone.get('outer_bottom', entry)), 2)
-                    email_stop_loss = outer_bot if is_bull else outer_top
-                    email_target    = outer_top if is_bull else outer_bot
-                
-                ts_obj     = last_zone.get('timestamp') or last_zone.get('reversal_time')
-                if hasattr(ts_obj, 'strftime'):
-                    ts_str = ts_obj.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-                else:
-                    ts_str = str(ts_obj)
-
-                email_payload = {
-                    'crypto':      user_sym,
-                    'timeframe':   self.timeframe,
-                    'signal_type': 'BUY' if is_bull else 'SELL',
-                    'entry_price': entry,
-                    'stop_loss':   email_stop_loss,
-                    'target':      email_target,
-                    'timestamp':   ts_str,
-                }
-
-                # Run synchronous email code in executor to avoid blocking
-                import asyncio
-                loop = asyncio.get_event_loop()
-                sent = await loop.run_in_executor(
-                    None,
-                    lambda: notify_signal_subscribers(email_payload)
-                )
-                if sent:
-                    logger.info(
-                        "📧 Live signal email: %d sent for %s %s %s  "
-                        "Entry=%.2f  SL=%.2f  TP=%.2f",
-                        sent, user_sym, self.timeframe,
-                        email_payload['signal_type'],
-                        entry, email_stop_loss, email_target,
-                    )
-            except Exception as email_exc:
-                logger.error("Email notify error in _emit_live_signal: %s", email_exc)
+            # ── Email notifications are now sent automatically via Django signals ─
+            # See reversal_zones/signals.py - sends INSTANT emails when signal is saved to DB
+            # This ensures users receive alerts at the EXACT moment the signal fires,
+            # regardless of WebSocket connection status.
 
             ts = last_zone["timestamp"]
             ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)

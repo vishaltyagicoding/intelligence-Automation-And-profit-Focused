@@ -152,12 +152,15 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
     Bulk-save filtered zones to DB.
     Uses update_or_create on (symbol, timeframe, reversal_time).
     Returns count of newly created records.
+    
+    NOTE: Email notifications are now sent automatically via Django signals
+    (reversal_zones/signals.py) when new signals are created. This ensures
+    INSTANT delivery at the exact moment the signal fires.
     """
     from reversal_zones.models import ReversalZone
     from django.db import IntegrityError
 
     saved = 0
-    new_signals = []  # Track new signals for email notifications
     
     for z in zones:
         try:
@@ -194,11 +197,7 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
             )
             if created:
                 saved += 1
-                # Store signal data for email notification
-                new_signals.append({
-                    'zone': zone,
-                    'data': z
-                })
+                # Email is sent automatically by Django signal (reversal_zones/signals.py)
 
         except (IntegrityError, Exception) as e:
             msg = str(e)
@@ -206,10 +205,6 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
                 logger.info("🛡️ DB constraint blocked consecutive signal [%s %s]", symbol, timeframe)
             else:
                 logger.error("Error saving zone [%s %s]: %s", symbol, timeframe, e)
-
-    # Send email notifications for new signals (only paid subscribers)
-    if new_signals:
-        _send_signal_notifications(symbol, timeframe, new_signals)
 
     return saved
 
@@ -253,68 +248,6 @@ _BINANCE_TO_USER_SYMBOL = {
     'PAXGUSDT': 'XAUUSD',   # Gold: stored as XAUUSD in user alerts
     'XAUUSDT':  'XAUUSD',
 }
-
-
-def _send_signal_notifications(symbol: str, timeframe: str, new_signals: list):
-    """
-    Send email notifications to paid subscribers for new signals.
-    Converts internal Binance symbol (BTCUSDT) to user-facing symbol (BTCUSD).
-    Only sends to users with manual_subscription='activated'.
-
-    CRITICAL: Uses professional stop loss & target from reversal_calculator.py:
-    - BUY:  stop_loss = outer_bottom (swing-based SL), target = outer_top (2:1 R:R)
-    - SELL: stop_loss = outer_top (swing-based SL), target = outer_bottom (2:1 R:R)
-    
-    Email alert and history page MUST show identical values (same price, same time).
-    """
-    try:
-        from signal_alerts.email_utils import notify_signal_subscribers
-        import pytz
-
-        # Convert Binance format (BTCUSDT) → user-facing format (BTCUSD)
-        user_symbol = _BINANCE_TO_USER_SYMBOL.get(symbol.upper(), symbol)
-
-        for signal_info in new_signals:
-            zone = signal_info['zone']
-
-            is_bull   = zone.is_bullish
-            entry     = round(float(zone.center_price), 2)
-            outer_top = round(float(zone.outer_top),    2)
-            outer_bot = round(float(zone.outer_bottom), 2)
-
-            # Professional stop loss & target (calculated by reversal_calculator.py)
-            # BUY:  stop_loss = outer_bottom (below entry), target = outer_top (above entry)
-            # SELL: stop_loss = outer_top (above entry), target = outer_bottom (below entry)
-            if is_bull:
-                stop_loss = outer_bot
-                target    = outer_top
-            else:
-                stop_loss = outer_top
-                target    = outer_bot
-
-            ts_str = zone.reversal_time.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-
-            signal_data = {
-                'crypto':       user_symbol,   # BTCUSD / ETHUSD / XAUUSD / LTCUSD
-                'timeframe':    timeframe,
-                'signal_type':  'BUY' if is_bull else 'SELL',
-                'entry_price':  entry,
-                'target':       target,
-                'stop_loss':    stop_loss,
-                'timestamp':    ts_str,
-            }
-
-            notifications_sent = notify_signal_subscribers(signal_data)
-
-            if notifications_sent > 0:
-                logger.info(
-                    "📧 %d email(s) sent — %s %s %s  Entry=%.2f  SL=%.2f  TP=%.2f",
-                    notifications_sent, user_symbol, timeframe,
-                    signal_data['signal_type'], entry, stop_loss, target,
-                )
-
-    except Exception as e:
-        logger.error("Error sending signal notifications: %s", e, exc_info=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

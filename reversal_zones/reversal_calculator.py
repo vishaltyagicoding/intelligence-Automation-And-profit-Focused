@@ -80,13 +80,15 @@ def _professional_sl_target(
     Professional stop loss & target for real algo trading.
 
     LOGIC:
-    - Stop Loss BUY: Find previous GREEN candle where LOW < current signal LOW, then -0.5%
-    - Stop Loss SELL: Find previous RED candle where HIGH > current signal HIGH, then +0.5%
-    - Target: MINIMUM 2.5% profit (realistic for crypto trading)
+    - Stop Loss BUY: Find previous GREEN candle where LOW < current signal LOW, 
+                     use that candle's OPEN price as stop loss
+    - Stop Loss SELL: Find previous RED candle where HIGH > current signal HIGH,
+                      use that candle's OPEN price as stop loss
+    - Target: MINIMUM 0.4% profit (dynamic based on risk-reward, 0.4% is floor)
     - Risk-Reward: 2.5:1 ratio
     """
     # ── Constants ────────────────────────────────────────────────────────
-    MIN_TARGET_PCT  = 0.025     # MINIMUM 2.5% target for real trading
+    MIN_TARGET_PCT  = 0.004     # MINIMUM 0.4% target (floor, not static)
     SL_BUFFER_PCT   = 0.005     # 0.5% buffer below/above swing point
     RISK_REWARD     = 2.5       # 2.5:1 risk-reward ratio
     LOOKBACK        = 50        # max candles to look back
@@ -102,6 +104,7 @@ def _professional_sl_target(
 
     if is_bullish:
         # ── BUY: Find previous GREEN candle where LOW < current signal LOW ──
+        # Use the OPEN price of that candle as stop loss
         for i in range(bar_index - 1, look_start - 1, -1):
             if i < 0 or i >= n:
                 continue
@@ -119,8 +122,8 @@ def _professional_sl_target(
 
             # Check if this candle's LOW is BELOW current signal's LOW
             if low < current_low:
-                # Found it! Use this LOW and subtract 0.5% buffer
-                sl_level = low * (1 - SL_BUFFER_PCT)
+                # Found it! Use the OPEN price of this candle as stop loss
+                sl_level = o
                 break
 
         if sl_level is None:
@@ -129,22 +132,23 @@ def _professional_sl_target(
 
         stop_loss = sl_level
 
-        # ── Target: MINIMUM 2.5% profit ──────────────────────────────────
+        # ── Target: Dynamic with 0.4% minimum floor ──────────────────────
         risk = center_price - stop_loss
         if risk <= 0:
             risk = center_price * 0.005  # 0.5% fallback
 
-        # Calculate minimum 2.5% target
-        min_target = center_price * (1 + MIN_TARGET_PCT)
-        
-        # Calculate risk-reward target (2.5:1)
+        # Calculate risk-reward target (2.5:1) - this is the PRIMARY target
         rr_target = center_price + (risk * RISK_REWARD)
         
-        # Take the HIGHER (ensures minimum 2.5% profit)
+        # Calculate minimum 0.4% target (floor only)
+        min_target = center_price * (1 + MIN_TARGET_PCT)
+        
+        # Use risk-reward target, but ensure it's at least 0.4%
         target = max(min_target, rr_target)
 
     else:
         # ── SELL: Find previous RED candle where HIGH > current signal HIGH ──
+        # Use the OPEN price of that candle as stop loss
         for i in range(bar_index - 1, look_start - 1, -1):
             if i < 0 or i >= n:
                 continue
@@ -162,8 +166,8 @@ def _professional_sl_target(
 
             # Check if this candle's HIGH is ABOVE current signal's HIGH
             if high > current_high:
-                # Found it! Use this HIGH and add 0.5% buffer
-                sl_level = high * (1 + SL_BUFFER_PCT)
+                # Found it! Use the OPEN price of this candle as stop loss
+                sl_level = o
                 break
 
         if sl_level is None:
@@ -172,18 +176,18 @@ def _professional_sl_target(
 
         stop_loss = sl_level
 
-        # ── Target: MINIMUM 2.5% profit ──────────────────────────────────
+        # ── Target: Dynamic with 0.4% minimum floor ──────────────────────
         risk = stop_loss - center_price
         if risk <= 0:
             risk = center_price * 0.005  # 0.5% fallback
 
-        # Calculate minimum 2.5% target (2.5% DOWN from entry)
-        min_target = center_price * (1 - MIN_TARGET_PCT)
-        
-        # Calculate risk-reward target (2.5:1)
+        # Calculate risk-reward target (2.5:1) - this is the PRIMARY target
         rr_target = center_price - (risk * RISK_REWARD)
         
-        # Take the LOWER (ensures minimum 2.5% profit down)
+        # Calculate minimum 0.4% target (floor only)
+        min_target = center_price * (1 - MIN_TARGET_PCT)
+        
+        # Use risk-reward target, but ensure it's at least 0.4%
         target = min(min_target, rr_target)
 
     # Round to 2 decimal places for consistency

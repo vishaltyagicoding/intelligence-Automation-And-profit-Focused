@@ -143,16 +143,20 @@ class Command(BaseCommand):
                         old_stop = float(record.outer_bottom if record.is_bullish else record.outer_top)
                         old_target = float(record.outer_top if record.is_bullish else record.outer_bottom)
 
-                        # Update database
+                        # Update database - update BOTH outer_top/outer_bottom AND stop_loss/target
                         if not dry_run:
                             if record.is_bullish:
                                 record.outer_bottom = Decimal(str(round(stop_loss, 2)))
                                 record.outer_top = Decimal(str(round(target, 2)))
+                                record.stop_loss = Decimal(str(round(stop_loss, 2)))
+                                record.target = Decimal(str(round(target, 2)))
                             else:
                                 record.outer_top = Decimal(str(round(stop_loss, 2)))
                                 record.outer_bottom = Decimal(str(round(target, 2)))
+                                record.stop_loss = Decimal(str(round(stop_loss, 2)))
+                                record.target = Decimal(str(round(target, 2)))
                             
-                            record.save(update_fields=['outer_top', 'outer_bottom'])
+                            record.save(update_fields=['outer_top', 'outer_bottom', 'stop_loss', 'target'])
                             updated_count += 1
 
                         # Show progress every 10 records

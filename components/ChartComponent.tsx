@@ -236,6 +236,7 @@ export default function ChartComponent({
     let binanceWs:         WebSocket | null = null;
     let binanceRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let binanceRetries     = 0;
+    let binancePingInterval: ReturnType<typeof setInterval> | null = null;
 
     const connectBinance = () => {
       if (gone.current) return;
@@ -250,6 +251,21 @@ export default function ChartComponent({
         setConnected(true);
         binanceRetries = 0;
         console.log(`✅ Binance WS: ${asset} ${timeframe}`);
+        
+        // Send periodic pings to keep connection alive (every 30 seconds)
+        // Binance WebSocket will close if no data is sent/received for 60 seconds
+        if (binancePingInterval) clearInterval(binancePingInterval);
+        binancePingInterval = setInterval(() => {
+          if (binanceWs?.readyState === WebSocket.OPEN) {
+            try {
+              // Binance doesn't require ping frames, but we send them anyway
+              // to keep the connection active through proxies/firewalls
+              binanceWs.send(JSON.stringify({ method: 'ping' }));
+            } catch (e) {
+              console.warn('Binance ping failed:', e);
+            }
+          }
+        }, 30_000);
       };
 
       binanceWs.onmessage = (ev: MessageEvent<string>) => {
@@ -261,12 +277,20 @@ export default function ChartComponent({
         } catch { /* ignore */ }
       };
 
-      binanceWs.onclose = () => {
+      binanceWs.onclose = (ev) => {
+        console.warn(`Binance WS closed: code=${ev.code}, reason=${ev.reason || 'none'}`);
         setConnected(false);
+        if (binancePingInterval) {
+          clearInterval(binancePingInterval);
+          binancePingInterval = null;
+        }
         scheduleBinanceRetry();
       };
 
-      binanceWs.onerror = () => { setConnected(false); };
+      binanceWs.onerror = (err) => {
+        console.error('Binance WS error:', err);
+        setConnected(false);
+      };
     };
 
     const scheduleBinanceRetry = () => {
@@ -503,6 +527,7 @@ export default function ChartComponent({
     return () => {
       gone.current = true;
       if (binanceRetryTimer)  clearTimeout(binanceRetryTimer);
+      if (binancePingInterval) clearInterval(binancePingInterval);
       if (backendRetryTimer)  clearTimeout(backendRetryTimer);
       if (backendHeartbeat)   clearInterval(backendHeartbeat);
       if (backendStaleTimer)  clearTimeout(backendStaleTimer);
@@ -528,6 +553,10 @@ export default function ChartComponent({
             <span className="text-slate-400">Chart Feed: </span>
             <span className={connected === null ? 'text-amber-400' : connected ? 'text-emerald-400' : 'text-rose-400'}>
               {connected === null ? 'Connecting…' : connected ? 'Live ●' : 'Reconnecting…'}
+            </span>
+            {connected === false && (
+              <span className="ml-2 text-xs text-slate-500">(auto-retry)</span>
+            )}
             </span>
           </div>
 

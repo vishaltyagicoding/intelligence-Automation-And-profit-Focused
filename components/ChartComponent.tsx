@@ -48,6 +48,30 @@ const TF_LIMIT: Record<Timeframe, number> = {
   '1h': 750, '2h': 375, '4h': 200, '1d': 180,
 };
 
+// Data source information for each asset (for transparency to traders)
+const ASSET_DATA_SOURCE: Record<WatchlistAsset, { exchange: string; symbol: string; description: string }> = {
+  BTCUSD: { 
+    exchange: 'BINANCE', 
+    symbol: 'BTCUSDT',
+    description: 'Bitcoin/USDT spot price from Binance (world\'s largest crypto exchange)'
+  },
+  ETHUSD: { 
+    exchange: 'BINANCE', 
+    symbol: 'ETHUSDT',
+    description: 'Ethereum/USDT spot price from Binance'
+  },
+  LTCUSD: { 
+    exchange: 'BINANCE', 
+    symbol: 'LTCUSDT',
+    description: 'Litecoin/USDT spot price from Binance'
+  },
+  XAUUSD: { 
+    exchange: 'BINANCE', 
+    symbol: 'PAXGUSDT',
+    description: 'Gold price via Paxos Gold (PAXG) token on Binance - 1 PAXG = 1 troy ounce of gold'
+  },
+};
+
 const COLOR_UP   = '#26a69a';
 const COLOR_DOWN = '#ef5350';
 
@@ -674,7 +698,11 @@ export default function ChartComponent({
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-cyan-400">Live Chart</p>
           <h2 className="mt-1 text-xl font-semibold text-white">{asset}</h2>
-          <p className="text-sm text-slate-400">Real-time candlestick chart with reversal signals.</p>
+          <p className="mt-1 text-xs text-slate-400">
+            <span className="text-slate-500">Source:</span>{' '}
+            <span className="font-medium text-cyan-400">{ASSET_DATA_SOURCE[asset].exchange}</span>
+            {' '}({ASSET_DATA_SOURCE[asset].symbol})
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -682,6 +710,13 @@ export default function ChartComponent({
             <span className="text-slate-400">Chart Feed: </span>
             <span className="text-emerald-400">
               Live ●
+            </span>
+          </div>
+
+          <div className="rounded-xl border border-cyan-900/30 bg-cyan-950/30 px-3 py-2 text-sm">
+            <span className="text-slate-400">Source: </span>
+            <span className="font-bold text-cyan-400">
+              {ASSET_DATA_SOURCE[asset].exchange}
             </span>
           </div>
 

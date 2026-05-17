@@ -236,7 +236,6 @@ export default function ChartComponent({
     let binanceWs:         WebSocket | null = null;
     let binanceRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let binanceRetries     = 0;
-    let binancePingInterval: ReturnType<typeof setInterval> | null = null;
 
     const connectBinance = () => {
       if (gone.current) return;
@@ -244,51 +243,48 @@ export default function ChartComponent({
       const ivl = TF_BINANCE[timeframe];
       const url = `wss://stream.binance.com:9443/ws/${sym}@kline_${ivl}`;
 
+      console.log(`🔌 Connecting to Binance: ${url}`);
+      
       try { binanceWs = new WebSocket(url); }
-      catch { scheduleBinanceRetry(); return; }
+      catch (err) { 
+        console.error('❌ Failed to create Binance WebSocket:', err);
+        scheduleBinanceRetry(); 
+        return; 
+      }
 
       binanceWs.onopen = () => {
         setConnected(true);
         binanceRetries = 0;
-        console.log(`✅ Binance WS: ${asset} ${timeframe}`);
+        console.log(`✅ Binance WS connected: ${asset} ${timeframe}`);
         
-        // Send periodic pings to keep connection alive (every 30 seconds)
-        // Binance WebSocket will close if no data is sent/received for 60 seconds
-        if (binancePingInterval) clearInterval(binancePingInterval);
-        binancePingInterval = setInterval(() => {
-          if (binanceWs?.readyState === WebSocket.OPEN) {
-            try {
-              // Binance doesn't require ping frames, but we send them anyway
-              // to keep the connection active through proxies/firewalls
-              binanceWs.send(JSON.stringify({ method: 'ping' }));
-            } catch (e) {
-              console.warn('Binance ping failed:', e);
-            }
-          }
-        }, 30_000);
+        // Binance WebSocket streams don't need application-level pings
+        // They automatically send data every ~1 second for active markets
+        // The connection stays alive as long as data is flowing
+        // No ping interval needed - data flow keeps connection alive
       };
 
       binanceWs.onmessage = (ev: MessageEvent<string>) => {
         try {
           const msg = JSON.parse(ev.data) as BinanceKlineMsg;
-          if (msg.e !== 'kline') return;
+          if (msg.e !== 'kline') {
+            console.log('📨 Binance message (not kline):', msg);
+            return;
+          }
           if (!historyLoaded) preloadBuffer.push(msg.k);
           else applyKline(msg.k);
-        } catch { /* ignore */ }
+        } catch (err) { 
+          console.error('❌ Error parsing Binance message:', err);
+        }
       };
 
       binanceWs.onclose = (ev) => {
-        console.warn(`Binance WS closed: code=${ev.code}, reason=${ev.reason || 'none'}`);
+        console.warn(`❌ Binance WS closed: code=${ev.code}, reason="${ev.reason || 'none'}", clean=${ev.wasClean}`);
         setConnected(false);
-        if (binancePingInterval) {
-          clearInterval(binancePingInterval);
-          binancePingInterval = null;
-        }
         scheduleBinanceRetry();
       };
 
       binanceWs.onerror = (err) => {
-        console.error('Binance WS error:', err);
+        console.error('❌ Binance WS error:', err);
         setConnected(false);
       };
     };
@@ -527,7 +523,6 @@ export default function ChartComponent({
     return () => {
       gone.current = true;
       if (binanceRetryTimer)  clearTimeout(binanceRetryTimer);
-      if (binancePingInterval) clearInterval(binancePingInterval);
       if (backendRetryTimer)  clearTimeout(backendRetryTimer);
       if (backendHeartbeat)   clearInterval(backendHeartbeat);
       if (backendStaleTimer)  clearTimeout(backendStaleTimer);

@@ -80,9 +80,9 @@ def _professional_sl_target(
     Professional stop loss & target for real algo trading.
 
     LOGIC:
-    - Stop Loss BUY: Find previous GREEN candle where LOW < current signal LOW, 
+    - Stop Loss BUY: Find previous GREEN candle where OPEN < current signal OPEN, 
                      use that candle's OPEN price as stop loss
-    - Stop Loss SELL: Find previous RED candle where HIGH > current signal HIGH,
+    - Stop Loss SELL: Find previous RED candle where OPEN > current signal OPEN,
                       use that candle's OPEN price as stop loss
     - Target: MINIMUM 0.4% profit (dynamic based on risk-reward, 0.4% is floor)
     - Risk-Reward: 2.5:1 ratio
@@ -98,19 +98,17 @@ def _professional_sl_target(
     look_start  = max(0, bar_index - LOOKBACK)
     sl_level    = None
     
-    # Get current signal candle's low/high
-    current_low  = float(df['low'].iloc[bar_index])
-    current_high = float(df['high'].iloc[bar_index])
+    # Use center_price (entry price) as the reference point for comparison
+    # center_price is the actual signal entry price (high for SELL, low for BUY)
 
     if is_bullish:
-        # ── BUY: Find previous GREEN candle where LOW < current signal LOW ──
+        # ── BUY: Find previous GREEN candle where OPEN < current signal entry ──
         # Use the OPEN price of that candle as stop loss
         for i in range(bar_index - 1, look_start - 1, -1):
             if i < 0 or i >= n:
                 continue
             o   = float(df['open'].iloc[i])
             c   = float(df['close'].iloc[i])
-            low = float(df['low'].iloc[i])
 
             # Must be a GREEN candle (close > open)
             if c <= o:
@@ -120,15 +118,15 @@ def _professional_sl_target(
             if body_pct < DOJI_THRESHOLD:
                 continue  # skip doji
 
-            # Check if this candle's LOW is BELOW current signal's LOW
-            if low < current_low:
+            # Check if this candle's OPEN is BELOW current signal entry price
+            if o < center_price:
                 # Found it! Use the OPEN price of this candle as stop loss
                 sl_level = o
                 break
 
         if sl_level is None:
-            # Fallback: use current candle's low - 0.5%
-            sl_level = current_low * (1 - SL_BUFFER_PCT)
+            # Fallback: use entry price - 0.5%
+            sl_level = center_price * (1 - SL_BUFFER_PCT)
 
         stop_loss = sl_level
 
@@ -147,14 +145,13 @@ def _professional_sl_target(
         target = max(min_target, rr_target)
 
     else:
-        # ── SELL: Find previous RED candle where HIGH > current signal HIGH ──
+        # ── SELL: Find previous RED candle where OPEN > current signal entry ──
         # Use the OPEN price of that candle as stop loss
         for i in range(bar_index - 1, look_start - 1, -1):
             if i < 0 or i >= n:
                 continue
             o    = float(df['open'].iloc[i])
             c    = float(df['close'].iloc[i])
-            high = float(df['high'].iloc[i])
 
             # Must be a RED candle (close < open)
             if c >= o:
@@ -164,15 +161,15 @@ def _professional_sl_target(
             if body_pct < DOJI_THRESHOLD:
                 continue  # skip doji
 
-            # Check if this candle's HIGH is ABOVE current signal's HIGH
-            if high > current_high:
+            # Check if this candle's OPEN is ABOVE current signal entry price
+            if o > center_price:
                 # Found it! Use the OPEN price of this candle as stop loss
                 sl_level = o
                 break
 
         if sl_level is None:
-            # Fallback: use current candle's high + 0.5%
-            sl_level = current_high * (1 + SL_BUFFER_PCT)
+            # Fallback: use entry price + 0.5%
+            sl_level = center_price * (1 + SL_BUFFER_PCT)
 
         stop_loss = sl_level
 

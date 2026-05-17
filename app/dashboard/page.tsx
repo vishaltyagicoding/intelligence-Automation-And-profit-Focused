@@ -4,67 +4,75 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
 import { getWebSocketUrl } from '@/lib/config';
-import ChartComponent, { type DataSourceType, type Timeframe, type WatchlistAsset } from '../../components/ChartComponent';
+import ChartComponent, { type Timeframe, type WatchlistAsset } from '../../components/ChartComponent';
 import Watchlist from '../../components/Watchlist';
 
-const ASSETS: WatchlistAsset[] = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'];
-type PriceMap = Record<WatchlistAsset, number | null>;
+const WATCHLIST_ASSETS: WatchlistAsset[] = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'LTCUSD'];
 
-// ─── Bitstamp ticker REST ─────────────────────────────────────────────────────
-const BS_REST: Record<WatchlistAsset, string | null> = {
-  BTCUSD: 'btcusd', ETHUSD: 'ethusd', LTCUSD: 'ltcusd', XAUUSD: null,
+type WatchlistPriceMap = Record<WatchlistAsset, number | null>;
+
+// Lowercase Binance stream names for each asset
+const ASSET_TO_BINANCE_WS: Record<WatchlistAsset, string> = {
+  BTCUSD: 'btcusdt',
+  ETHUSD: 'ethusdt',
+  XAUUSD: 'paxgusdt',
+  LTCUSD: 'ltcusdt',
 };
 
-// ─── Binance combined mini-ticker ─────────────────────────────────────────────
-const BN_WS_SYM: Record<WatchlistAsset, string> = {
-  BTCUSD: 'btcusdt', ETHUSD: 'ethusdt', XAUUSD: 'paxgusdt', LTCUSD: 'ltcusdt',
+// Map Binance uppercase symbol back to our asset key
+const BINANCE_SYMBOL_TO_ASSET: Record<string, WatchlistAsset> = {
+  BTCUSDT:  'BTCUSD',
+  ETHUSDT:  'ETHUSD',
+  PAXGUSDT: 'XAUUSD',
+  LTCUSDT:  'LTCUSD',
 };
-const BN_SYM_TO_ASSET: Record<string, WatchlistAsset> = {
-  BTCUSDT: 'BTCUSD', ETHUSDT: 'ETHUSD', PAXGUSDT: 'XAUUSD', LTCUSDT: 'LTCUSD',
+
+// REST symbols for initial price fetch
+const ASSET_TO_BINANCE_REST: Record<WatchlistAsset, string> = {
+  BTCUSD: 'BTCUSDT',
+  ETHUSD: 'ETHUSDT',
+  XAUUSD: 'PAXGUSDT',
+  LTCUSD: 'LTCUSDT',
 };
-const BINANCE_COMBINED =
-  `wss://stream.binance.com:9443/stream?streams=${ASSETS.map(a => `${BN_WS_SYM[a]}@miniTicker`).join('/')}`;
 
-interface MiniTicker { s: string; c: string; }
+// ─── Combined mini-ticker stream URL ─────────────────────────────────────────
+// One WebSocket → all 4 asset prices simultaneously.
+// Binance sends a tick every ~1 second per symbol → prices can never get stuck.
+// Completely bypasses backend / nginx / Redis / Django for price data.
+const COMBINED_TICKER_URL =
+  `wss://stream.binance.com:9443/stream?streams=${
+    WATCHLIST_ASSETS.map(a => `${ASSET_TO_BINANCE_WS[a]}@miniTicker`).join('/')
+  }`;
 
-// ─── Source options ───────────────────────────────────────────────────────────
-interface SourceOption {
-  value: DataSourceType;
-  cryptoLabel: string;   // label for BTC/ETH/LTC
-  xauLabel: string;      // label for XAU/USD
-  description: string;
+interface MiniTickerData {
+  e: string;   // "24hrMiniTicker"
+  s: string;   // "BTCUSDT"
+  c: string;   // current/close price
 }
-const SOURCE_OPTIONS: SourceOption[] = [
-  {
-    value: 'bitstamp',
-    cryptoLabel: 'BITSTAMP',
-    xauLabel: 'FOREXCOM',
-    description: 'Bitstamp (crypto) · FOREXCOM (gold) — matches TradingView default prices',
-  },
-  {
-    value: 'binance',
-    cryptoLabel: 'BINANCE',
-    xauLabel: 'OANDA',
-    description: 'Binance (crypto) · OANDA (gold) — highest liquidity crypto exchange',
-  },
-];
 
-// ─────────────────────────────────────────────────────────────────────────────
-export default function DashboardPage() {
-  const router = useRouter();
+interface CombinedStreamMsg {
+  stream: string;
+  data: MiniTickerData;
+}
+
+export default function Page() {
+  const router                = useRouter();
   const { isAuthenticated, loading, user } = useAuth();
 
-  const [selectedAsset,     setSelectedAsset]     = useState<WatchlistAsset>('BTCUSD');
+  const [selectedAsset,    setSelectedAsset]    = useState<WatchlistAsset>('BTCUSD');
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('15m');
-  const [dataSource,        setDataSource]        = useState<DataSourceType>('bitstamp');
-  const [prices,            setPrices]            = useState<PriceMap>({
+  const [watchlistPrices,  setWatchlistPrices]  = useState<WatchlistPriceMap>({
     BTCUSD: null, ETHUSD: null, XAUUSD: null, LTCUSD: null,
   });
+  const [marketConnected, setMarketConnected] = useState<boolean | null>(null);
 
-  const wsBaseUrl  = useMemo(() => getWebSocketUrl(), []);
+  const wsBaseUrl = useMemo(() => getWebSocketUrl(), []);
+
+  // Track whether cleanup has run so async callbacks don't set state after unmount
   const mountedRef = useRef(true);
 
   // ── Route guards ────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!loading && !isAuthenticated) router.push('/login');
   }, [isAuthenticated, loading, router]);
@@ -77,249 +85,148 @@ export default function DashboardPage() {
     }
   }, [isAuthenticated, loading, user, router]);
 
-  useEffect(() => () => { mountedRef.current = false; }, []);
-
-  // ── Watchlist prices: Bitstamp source ─────────────────────────────────────
   useEffect(() => {
-    if (!isAuthenticated || dataSource !== 'bitstamp') return;
+    return () => { mountedRef.current = false; };
+  }, []);
 
-    let cleaned = false;
-    const sockets: WebSocket[] = [];
-    const retryTimers: ReturnType<typeof setTimeout>[] = [];
-
-    // Fetch initial REST prices for BTC/ETH/LTC from Bitstamp
-    ASSETS.forEach(async asset => {
-      const pair = BS_REST[asset];
-      if (!pair) return; // XAU handled separately
-      try {
-        const r = await fetch(`https://www.bitstamp.net/api/v2/ticker/${pair}/`);
-        const d = await r.json();
-        if (d.last && mountedRef.current) {
-          setPrices(prev => ({ ...prev, [asset]: parseFloat(d.last) }));
-        }
-      } catch { /* non-fatal */ }
-    });
-
-    // Live WebSocket for BTC/ETH/LTC via Bitstamp live_trades
-    ASSETS.forEach(asset => {
-      const pair = BS_REST[asset];
-      if (!pair) return; // skip XAU
-
-      let retries = 0;
-      const connect = () => {
-        if (cleaned) return;
-        const ws = new WebSocket('wss://ws.bitstamp.net');
-        sockets.push(ws);
-
-        ws.onopen = () => {
-          retries = 0;
-          ws.send(JSON.stringify({ event: 'bts:subscribe', data: { channel: `live_trades_${pair}` } }));
-        };
-
-        ws.onmessage = (ev: MessageEvent<string>) => {
-          try {
-            const msg = JSON.parse(ev.data) as Record<string, unknown>;
-            if (msg.event !== 'trade') return;
-            const d = msg.data as Record<string, unknown>;
-            const price = parseFloat(d.price_str as string || String(d.price));
-            if (Number.isFinite(price) && mountedRef.current)
-              setPrices(prev => prev[asset] === price ? prev : { ...prev, [asset]: price });
-          } catch { /* ignore */ }
-        };
-
-        ws.onclose = () => {
-          if (cleaned) return;
-          retries++;
-          const t = setTimeout(connect, Math.min(1000 * Math.pow(2, Math.min(retries - 1, 3)), 10_000));
-          retryTimers.push(t);
-        };
-        ws.onerror = () => { /* onclose fires */ };
-      };
-      connect();
-    });
-
-    // XAU/USD price via backend proxy (FOREXCOM = Yahoo Finance GC=F)
-    let xauTimer: ReturnType<typeof setInterval> | null = null;
-    const pollXau = async () => {
-      if (cleaned) return;
-      try {
-        const r = await fetch('/api/market/xau-price/?source=forexcom');
-        const d = await r.json();
-        if (d.success && d.price > 0 && mountedRef.current)
-          setPrices(prev => ({ ...prev, XAUUSD: d.price as number }));
-      } catch { /* non-fatal */ }
-    };
-    pollXau();
-    xauTimer = setInterval(pollXau, 10_000);
-
-    return () => {
-      cleaned = true;
-      retryTimers.forEach(clearTimeout);
-      if (xauTimer) clearInterval(xauTimer);
-      sockets.forEach(ws => { try { ws.close(); } catch { /* ignore */ } });
-    };
-  }, [isAuthenticated, dataSource]);
-
-  // ── Watchlist prices: Binance source ──────────────────────────────────────
+  // ── Fetch initial prices from Binance REST (instant first paint) ────────────
   useEffect(() => {
-    if (!isAuthenticated || dataSource !== 'binance') return;
+    if (!isAuthenticated) return;
 
-    let ws: WebSocket | null = null;
+    (async () => {
+      for (const asset of WATCHLIST_ASSETS) {
+        try {
+          const symbol = ASSET_TO_BINANCE_REST[asset];
+          const res    = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+          const data   = await res.json();
+          if (data.price && mountedRef.current) {
+            setWatchlistPrices(prev => ({ ...prev, [asset]: parseFloat(data.price) }));
+          }
+        } catch { /* non-fatal */ }
+      }
+    })();
+  }, [isAuthenticated]);
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // BINANCE COMBINED MINI-TICKER — single WebSocket for all 4 watchlist prices
+  //
+  // One connection delivers all 4 prices every ~1 second directly from Binance.
+  // No backend, no nginx, no Redis in the path — prices can NEVER get stuck.
+  //
+  // If this connection drops, it reconnects with exponential backoff (no cap on
+  // attempts) and restores all 4 prices automatically without a page refresh.
+  // ════════════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let ws:         WebSocket | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let retries = 0;
-    let cleaned = false;
-    let xauTimer: ReturnType<typeof setInterval> | null = null;
+    let retryCount  = 0;
+    let cleanedUp   = false;
 
-    // Initial REST prices
-    ASSETS.forEach(async asset => {
-      if (asset === 'XAUUSD') return;
-      try {
-        const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${BN_WS_SYM[asset].toUpperCase()}`);
-        const d = await r.json();
-        if (d.price && mountedRef.current)
-          setPrices(prev => ({ ...prev, [asset]: parseFloat(d.price) }));
-      } catch { /* non-fatal */ }
-    });
-
-    // Combined Binance mini-ticker WebSocket
     const connect = () => {
-      if (cleaned) return;
-      try { ws = new WebSocket(BINANCE_COMBINED); } catch { schedRetry(); return; }
+      if (cleanedUp) return;
 
-      ws.onopen = () => { retries = 0; };
+      try { ws = new WebSocket(COMBINED_TICKER_URL); }
+      catch { scheduleRetry(); return; }
+
+      ws.onopen = () => {
+        retryCount = 0;
+        if (mountedRef.current) setMarketConnected(true);
+        console.log('✅ Binance combined ticker WS connected');
+      };
+
       ws.onmessage = (ev: MessageEvent<string>) => {
         try {
-          const msg = JSON.parse(ev.data) as { stream: string; data: MiniTicker };
-          const sym   = msg.data?.s?.toUpperCase();
-          const price = parseFloat(msg.data?.c ?? '');
-          const asset = BN_SYM_TO_ASSET[sym];
-          if (!asset || !Number.isFinite(price)) return;
-          if (mountedRef.current)
-            setPrices(prev => prev[asset] === price ? prev : { ...prev, [asset]: price });
-        } catch { /* ignore */ }
+          const msg    = JSON.parse(ev.data) as CombinedStreamMsg;
+          const symbol = msg.data?.s?.toUpperCase();     // e.g. "BTCUSDT"
+          const price  = parseFloat(msg.data?.c ?? '');  // current price
+
+          if (!symbol || !Number.isFinite(price)) return;
+
+          const asset = BINANCE_SYMBOL_TO_ASSET[symbol];
+          if (!asset) return;
+
+          if (mountedRef.current) {
+            setWatchlistPrices(prev => {
+              if (prev[asset] === price) return prev;  // skip no-op updates
+              return { ...prev, [asset]: price };
+            });
+          }
+        } catch { /* ignore bad frames */ }
       };
-      ws.onclose = () => { if (!cleaned) schedRetry(); };
-      ws.onerror = () => { /* onclose fires */ };
+
+      ws.onclose = () => {
+        if (mountedRef.current) setMarketConnected(false);
+        scheduleRetry();
+      };
+
+      ws.onerror = () => {
+        if (mountedRef.current) setMarketConnected(false);
+        // onclose fires next
+      };
     };
 
-    const schedRetry = () => {
-      if (cleaned) return;
-      retries++;
-      retryTimer = setTimeout(connect, Math.min(1000 * Math.pow(2, Math.min(retries - 1, 3)), 10_000));
+    const scheduleRetry = () => {
+      if (cleanedUp) return;
+      retryCount++;
+      // Backoff: 1s → 2s → 4s → 8s → 10s (cap) — retries forever, no attempt limit
+      const delay = Math.min(1000 * Math.pow(2, Math.min(retryCount - 1, 3)), 10_000);
+      console.log(`Binance ticker WS retry in ${delay}ms (#${retryCount})`);
+      retryTimer = setTimeout(connect, delay);
     };
 
     connect();
 
-    // XAU/USD via backend proxy (OANDA = Yahoo Finance XAUUSD=X)
-    const pollXau = async () => {
-      if (cleaned) return;
-      try {
-        const r = await fetch('/api/market/xau-price/?source=oanda');
-        const d = await r.json();
-        if (d.success && d.price > 0 && mountedRef.current)
-          setPrices(prev => ({ ...prev, XAUUSD: d.price as number }));
-      } catch { /* non-fatal */ }
-    };
-    pollXau();
-    xauTimer = setInterval(pollXau, 10_000);
-
     return () => {
-      cleaned = true;
+      cleanedUp = true;
       if (retryTimer) clearTimeout(retryTimer);
-      if (xauTimer)   clearInterval(xauTimer);
       try { ws?.close(); } catch { /* ignore */ }
     };
-  }, [isAuthenticated, dataSource]);
+  }, [isAuthenticated]);
 
-  // ── Chart price update → keep watchlist in sync ───────────────────────────
-  const handleChartPrice = useCallback((asset: WatchlistAsset, price: number) => {
-    if (!mountedRef.current) return;
-    setPrices(prev => prev[asset] === price ? prev : { ...prev, [asset]: price });
-  }, []);
-
-  // ── Loading / auth guards ─────────────────────────────────────────────────
-  if (loading) return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-      <div className="text-center">
-        <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent" />
-        <p className="mt-4 text-slate-400">Loading…</p>
-      </div>
-    </div>
+  // ── onPriceUpdate from ChartComponent ─────────────────────────────────────
+  // The chart connects directly to Binance for candle data and fires this on
+  // every tick. For the selected asset, this slightly overrides the mini-ticker
+  // price to use the exact kline close — ensures "Price:" header and watchlist
+  // always display the identical number.
+  const handleChartPriceUpdate = useCallback(
+    (asset: WatchlistAsset, price: number) => {
+      if (!mountedRef.current) return;
+      setWatchlistPrices(prev => {
+        if (prev[asset] === price) return prev;
+        return { ...prev, [asset]: price };
+      });
+    },
+    []
   );
+
+  // ── Loading / auth guards ───────────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+        <div className="text-center">
+          <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-solid border-cyan-500 border-r-transparent" />
+          <p className="mt-4 text-slate-400">Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!isAuthenticated) return null;
 
-  // ── Render ────────────────────────────────────────────────────────────────
-  const activeSource = SOURCE_OPTIONS.find(s => s.value === dataSource)!;
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       <div className="mx-auto max-w-[1800px] px-4 py-6">
-
-        {/* ── Data Source Switcher ── */}
-        <div className="mb-5 rounded-2xl border border-slate-800 bg-slate-900/60 px-5 py-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Data Source</p>
-              <p className="mt-0.5 text-xs text-slate-500">{activeSource.description}</p>
-            </div>
-            <div className="flex gap-2 ml-auto">
-              {SOURCE_OPTIONS.map(opt => {
-                const isActive = dataSource === opt.value;
-                const cryptoLbl = opt.cryptoLabel;
-                const xauLbl    = opt.xauLabel;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setDataSource(opt.value)}
-                    className={`rounded-xl border px-4 py-2.5 text-left transition-all ${
-                      isActive
-                        ? 'border-cyan-500/60 bg-cyan-500/15 shadow-md shadow-cyan-500/20'
-                        : 'border-slate-700 bg-slate-800/60 hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {isActive && <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />}
-                      <span className={`text-xs font-bold ${isActive ? 'text-cyan-300' : 'text-slate-300'}`}>
-                        {cryptoLbl}
-                      </span>
-                      <span className="text-slate-600">·</span>
-                      <span className={`text-xs font-bold ${isActive ? 'text-yellow-300' : 'text-slate-400'}`}>
-                        {xauLbl}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[10px] text-slate-500">
-                      {opt.value === 'bitstamp' ? 'Default (matches TradingView)' : 'Alternative source'}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Source details row */}
-          <div className="mt-3 flex flex-wrap gap-3 text-xs">
-            {(['BTCUSD','ETHUSD','LTCUSD'] as WatchlistAsset[]).map(a => (
-              <span key={a} className="rounded-lg bg-slate-800 px-2.5 py-1 text-slate-400">
-                <span className="font-semibold text-white">{a}</span>
-                {' → '}
-                <span className="text-cyan-300">{activeSource.cryptoLabel}</span>
-              </span>
-            ))}
-            <span className="rounded-lg bg-slate-800 px-2.5 py-1 text-slate-400">
-              <span className="font-semibold text-white">XAUUSD</span>
-              {' → '}
-              <span className="text-yellow-300">{activeSource.xauLabel}</span>
-            </span>
-          </div>
-        </div>
-
-        {/* ── Main grid ── */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+
           <aside className="lg:col-span-3">
             <Watchlist
-              assets={ASSETS}
-              prices={prices}
+              assets={WATCHLIST_ASSETS}
+              prices={watchlistPrices}
               selectedAsset={selectedAsset}
               onSelectAsset={setSelectedAsset}
               subscriptionActive={true}
@@ -335,10 +242,10 @@ export default function DashboardPage() {
               timeframe={selectedTimeframe}
               onTimeframeChange={setSelectedTimeframe}
               showFullDashboardButton={true}
-              onPriceUpdate={handleChartPrice}
-              dataSource={dataSource}
+              onPriceUpdate={handleChartPriceUpdate}
             />
           </main>
+
         </div>
       </div>
     </div>

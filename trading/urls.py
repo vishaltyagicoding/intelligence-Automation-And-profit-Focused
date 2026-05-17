@@ -20,7 +20,4 @@ urlpatterns = [
     path('signal-history/<str:symbol>/', views.get_signal_history, name='signal-history'),
     # Trigger 30-day historical signal calculation
     path('calculate-history/<str:symbol>/', views.trigger_history_calculation, name='calculate-history'),
-    # XAU/USD market data proxy (server-side fetch avoids browser CORS)
-    path('xau-ohlc/',  views.xau_ohlc_proxy,  name='xau-ohlc-proxy'),
-    path('xau-price/', views.xau_price_proxy,  name='xau-price-proxy'),
 ]

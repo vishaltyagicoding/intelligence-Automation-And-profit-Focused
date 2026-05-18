@@ -1,5 +1,6 @@
 """
 fix_mismatched_signal_prices.py
+this is singaupre server chekc
 ================================
 Backfills stop_loss and target for all old ReversalZone records where
 those fields are NULL.

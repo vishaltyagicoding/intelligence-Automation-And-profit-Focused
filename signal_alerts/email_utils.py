@@ -12,10 +12,10 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
-def send_signal_alert_email(email, username, signal_data):
+def send_signal_alert_email(email, username, signal_data, user_tz='UTC'):
     """
     Send signal alert email to user when a new signal is generated
-    
+
     Args:
         email (str): Recipient email address
         username (str): User's username
@@ -26,23 +26,43 @@ def send_signal_alert_email(email, username, signal_data):
             - entry_price: Entry price
             - stop_loss: Stop loss level
             - target: Target level
-            - timestamp: Signal generation time
-    
+            - timestamp: Signal generation time (UTC string, fallback)
+            - timestamp_dt: raw UTC datetime object (preferred)
+        user_tz (str): IANA timezone name for the recipient (e.g. 'Asia/Kolkata')
+
     Returns:
         bool: True if email sent successfully, False otherwise
     """
     try:
+        import pytz
         # Email configuration
         smtp_server = "smtp.gmail.com"
         smtp_port = 587
         sender_email = settings.EMAIL_HOST_USER
         sender_password = settings.EMAIL_HOST_PASSWORD
-        
+
         # Extract signal data — round all prices to 2 decimal places for clean display
         crypto       = signal_data.get('crypto', 'N/A')
         timeframe    = signal_data.get('timeframe', 'N/A')
         signal_type  = signal_data.get('signal_type', 'N/A')
-        timestamp    = signal_data.get('timestamp', 'N/A')
+
+        # ── Timezone-aware timestamp ──────────────────────────────────────────
+        # Use the raw datetime if available so we can reformat in user's timezone.
+        raw_dt = signal_data.get('timestamp_dt')
+        try:
+            tz = pytz.timezone(user_tz)
+        except Exception:
+            tz = pytz.utc
+
+        if raw_dt is not None:
+            local_dt = raw_dt.astimezone(tz)
+            # e.g. "2026-05-17 22:15:00 IST"
+            tz_label = local_dt.strftime('%Z')           # e.g. IST, EST, UTC
+            timestamp = local_dt.strftime(f'%Y-%m-%d %H:%M:%S {tz_label}')
+        else:
+            # Fallback: use the pre-formatted UTC string
+            timestamp = signal_data.get('timestamp', 'N/A')
+        # ─────────────────────────────────────────────────────────────────────
 
         # Round prices to 2 decimal places so email matches history page exactly
         def _fmt_price(val):
@@ -56,7 +76,7 @@ def send_signal_alert_email(email, username, signal_data):
 
         raw_stop = signal_data.get('stop_loss')
         stop_loss = _fmt_price(raw_stop) if raw_stop not in (None, '', 0, 'N/A') else 'N/A'
-        
+
         # Determine signal color and emoji
         if signal_type == 'BUY':
             signal_color = '#10b981'  # Green
@@ -298,25 +318,25 @@ def send_signal_alert_email(email, username, signal_data):
 
 def notify_signal_subscribers(signal_data):
     """
-    Notify all subscribers who have alerts matching the signal criteria
-    
+    Notify all subscribers who have alerts matching the signal criteria.
+    Each email is formatted in the subscriber's OWN saved timezone.
+
     Args:
-        signal_data (dict): Signal information
-    
+        signal_data (dict): Signal information (includes timestamp_dt for tz conversion)
+
     Returns:
         int: Number of notifications sent
     """
     from .models import SignalAlert
-    
-    crypto = signal_data.get('crypto')
+
+    crypto    = signal_data.get('crypto')
     timeframe = signal_data.get('timeframe')
-    
+
     if not crypto or not timeframe:
         logger.warning("Signal data missing crypto or timeframe")
         return 0
-    
+
     # Normalise crypto to user-facing format (BTCUSD not BTCUSDT)
-    # This matches what's stored in SignalAlert.crypto
     BINANCE_TO_USER = {
         'BTCUSDT': 'BTCUSD', 'ETHUSDT': 'ETHUSD',
         'LTCUSDT': 'LTCUSD', 'PAXGUSDT': 'XAUUSD', 'XAUUSDT': 'XAUUSD',
@@ -330,20 +350,25 @@ def notify_signal_subscribers(signal_data):
         is_active=True,
         user__manual_subscription='activated'
     ).select_related('user')
-    
+
     notifications_sent = 0
-    
+
     for alert in alerts:
         try:
+            # Use the subscriber's saved timezone (set by browser on login).
+            # Falls back to 'UTC' if not yet populated.
+            user_tz = getattr(alert.user, 'timezone', 'UTC') or 'UTC'
+
             success = send_signal_alert_email(
                 email=alert.email,
                 username=alert.user.username,
-                signal_data=signal_data
+                signal_data=signal_data,
+                user_tz=user_tz,           # ← per-subscriber local timezone
             )
             if success:
                 notifications_sent += 1
         except Exception as e:
             logger.error(f"Error sending alert to {alert.user.username}: {e}")
-    
+
     logger.info(f"📧 Sent {notifications_sent} signal alert notifications for {crypto} {timeframe}")
     return notifications_sent

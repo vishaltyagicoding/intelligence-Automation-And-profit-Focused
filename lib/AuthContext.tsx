@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTimezoneSync } from './useTimezoneSync';
 
 interface User {
   id: string;
@@ -39,6 +40,12 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Auto-sync the browser timezone to the backend once per session.
+  // This is used to format email alert timestamps in the user's local time.
+  useTimezoneSync(
+    typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
+  );
   const router = useRouter();
 
   useEffect(() => {

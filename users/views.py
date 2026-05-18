@@ -1047,3 +1047,25 @@ def resend_reset_otp(request):
             'success': False,
             'error': 'An unexpected error occurred. Please try again.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def update_timezone(request):
+    """
+    Save the user's browser-detected IANA timezone (e.g. 'Asia/Kolkata').
+    Called automatically on every page load from the frontend.
+    Used to format timestamps in email alert notifications.
+    """
+    import pytz
+    tz_name = request.data.get('timezone', '').strip()
+    if not tz_name:
+        return Response({'success': False, 'error': 'timezone is required'}, status=400)
+    try:
+        pytz.timezone(tz_name)  # validate it's a real IANA zone
+    except pytz.exceptions.UnknownTimeZoneError:
+        return Response({'success': False, 'error': f'Unknown timezone: {tz_name}'}, status=400)
+
+    request.user.timezone = tz_name
+    request.user.save(update_fields=['timezone'])
+    return Response({'success': True, 'timezone': tz_name})

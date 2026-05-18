@@ -30,6 +30,19 @@ function fmt(n: number | null): string {
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** Format a UTC ISO timestamp in the visitor's local timezone */
+function fmtTime(isoStr: string): string {
+  try {
+    return new Date(isoStr).toLocaleString(undefined, {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    return isoStr;
+  }
+}
+
 export default function SignalHistoryPage() {
   const router = useRouter();
   const { isAuthenticated, loading, user } = useAuth();
@@ -84,12 +97,17 @@ export default function SignalHistoryPage() {
           const id   = `${symbol}-${timeframe}-${ts}-${idx}`;
           const oTop = s.outer_top as number;
           const oBot = s.outer_bottom as number;
+          // Use the explicitly calculated stop_loss / target returned by the API.
+          // For XAUUSD (PAXG) and all other assets, these are derived from the
+          // actual entry (confirmation-candle close), not from outer_top/bottom.
+          const apiSl  = (s.stop_loss  as number) ?? (bull ? oBot : oTop);
+          const apiTgt = (s.target     as number) ?? (bull ? oTop : oBot);
           fresh.set(id, {
             id, timestamp: ts, symbol, timeframe,
             action:     bull ? 'BUY' : 'SELL',
             entryPrice: s.center_price as number,
-            stopLoss:   bull ? oBot : oTop,
-            target:     bull ? oTop : oBot,
+            stopLoss:   apiSl,
+            target:     apiTgt,
             status:     'OPEN',
           });
         });
@@ -279,7 +297,7 @@ export default function SignalHistoryPage() {
           </div>
           {lastUpdated && (
             <p className="text-xs text-slate-500 mt-1 whitespace-nowrap">
-              Updated {lastUpdated.toISOString().replace('T', ' ').slice(0, 19)} UTC
+              Updated {fmtTime(lastUpdated.toISOString())}
             </p>
           )}
         </div>
@@ -337,7 +355,7 @@ export default function SignalHistoryPage() {
             <table className="w-full">
               <thead className="border-b border-slate-800/50 bg-slate-950/50">
                 <tr>
-                  {['DATE & TIME (UTC)', 'SYMBOL', 'TIMEFRAME', 'ACTION', 'ENTRY PRICE', 'STOP LOSS', 'TARGET', 'STATUS'].map(h => (
+                  {['DATE & TIME (LOCAL)', 'SYMBOL', 'TIMEFRAME', 'ACTION', 'ENTRY PRICE', 'STOP LOSS', 'TARGET', 'STATUS'].map(h => (
                     <th key={h} className={`px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400 ${h === 'ENTRY PRICE' || h === 'STOP LOSS' || h === 'TARGET' ? 'text-right' : h === 'STATUS' ? 'text-center' : 'text-left'}`}>
                       {h}
                     </th>
@@ -361,7 +379,7 @@ export default function SignalHistoryPage() {
                 ) : filtered.map(signal => (
                   <tr key={signal.id} className="hover:bg-slate-800/30 transition">
                     <td className="px-6 py-4 text-sm text-slate-300 whitespace-nowrap">
-                      {new Date(signal.timestamp).toISOString().replace('T', ' ').slice(0, 19)} UTC
+                      {fmtTime(signal.timestamp)}
                     </td>
                     <td className="px-6 py-4">
                       <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-white">

@@ -45,48 +45,55 @@ def send_instant_email_on_new_signal(sender, instance, created, **kwargs):
     try:
         from signal_alerts.email_utils import notify_signal_subscribers
         import pytz
-        
+
         # Convert Binance format (BTCUSDT) → user-facing format (BTCUSD)
         BINANCE_TO_USER = {
-            'BTCUSDT': 'BTCUSD',
-            'ETHUSDT': 'ETHUSD',
-            'LTCUSDT': 'LTCUSD',
+            'BTCUSDT':  'BTCUSD',
+            'ETHUSDT':  'ETHUSD',
+            'LTCUSDT':  'LTCUSD',
             'PAXGUSDT': 'XAUUSD',
-            'XAUUSDT': 'XAUUSD',
+            'XAUUSDT':  'XAUUSD',
         }
-        
+
         user_symbol = BINANCE_TO_USER.get(instance.symbol.upper(), instance.symbol)
-        
+
         is_bull = instance.is_bullish
         entry = round(float(instance.center_price), 2)
-        
+
         # Use the new stop_loss and target fields if available
         if instance.stop_loss and instance.target:
             stop_loss = round(float(instance.stop_loss), 2)
-            target = round(float(instance.target), 2)
+            target    = round(float(instance.target),    2)
         else:
             # Fallback to outer_top/outer_bottom
-            outer_top = round(float(instance.outer_top), 2)
+            outer_top = round(float(instance.outer_top),    2)
             outer_bot = round(float(instance.outer_bottom), 2)
             stop_loss = outer_bot if is_bull else outer_top
-            target = outer_top if is_bull else outer_bot
-        
-        # Format timestamp
-        ts_str = instance.reversal_time.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
-        
+            target    = outer_top if is_bull else outer_bot
+
+        # ── Timezone-aware timestamp ──────────────────────────────────────────
+        # notify_signal_subscribers is called ONCE here with the raw UTC datetime.
+        # Each subscriber's email is formatted with THEIR OWN saved timezone by
+        # the helper inside notify_signal_subscribers (see email_utils.py).
+        # We pass the raw datetime object so the mailer can convert per-user.
+        # ─────────────────────────────────────────────────────────────────────
+        utc_dt  = instance.reversal_time.astimezone(pytz.utc)
+        ts_utc  = utc_dt.strftime('%Y-%m-%d %H:%M:%S UTC')   # fallback plain string
+
         signal_data = {
-            'crypto': user_symbol,
-            'timeframe': instance.timeframe,
-            'signal_type': 'BUY' if is_bull else 'SELL',
-            'entry_price': entry,
-            'target': target,
-            'stop_loss': stop_loss,
-            'timestamp': ts_str,
+            'crypto':        user_symbol,
+            'timeframe':     instance.timeframe,
+            'signal_type':   'BUY' if is_bull else 'SELL',
+            'entry_price':   entry,
+            'target':        target,
+            'stop_loss':     stop_loss,
+            'timestamp':     ts_utc,          # UTC string (fallback)
+            'timestamp_dt':  utc_dt,          # raw datetime — for per-user tz conversion
         }
-        
+
         # Send email notifications to paid subscribers
         notifications_sent = notify_signal_subscribers(signal_data)
-        
+
         if notifications_sent > 0:
             logger.info(
                 "📧 INSTANT EMAIL: %d sent for %s %s %s @ %.2f (SL=%.2f, TP=%.2f)",

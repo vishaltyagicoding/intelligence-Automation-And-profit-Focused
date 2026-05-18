@@ -670,9 +670,58 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             await self.redis_client.set(time_cache_key, str(new_signal_ts), ex=86400)
             await self.redis_client.set(cache_key, fingerprint, ex=86400)
 
+            # ══════════════════════════════════════════════════════════════════
+            # FIX: Use actual current close price as ENTRY — not the pivot price.
+            #
+            # WHY: The reversal calculator sets center_price = the HISTORICAL
+            # pivot high (for SELL) or pivot low (for BUY). The signal is only
+            # CONFIRMED later when the price has moved away from that pivot. So
+            # the history-page "Entry Price" (center_price = pivot) could differ
+            # significantly from what the live chart shows at the signal candle.
+            # This mismatch is especially visible for XAUUSD (PAXGUSDT) where
+            # the pivot-to-confirmation distance can be $50+.
+            #
+            # SOLUTION:
+            #   entry = actual close of the CURRENT (confirmation) candle
+            #   SL    = original zone stop_loss (anchored to the pivot structure)
+            #   Target = entry ± risk × 2.5  (recalculated from actual entry)
+            # ══════════════════════════════════════════════════════════════════
+            actual_close = round(float(df["close"].iloc[-1]), 2)
+            is_bull = last_zone["is_bullish"]
+            pivot_price = last_zone["center_price"]
+
+            # Keep the technically-correct SL (based on pivot structure)
+            orig_sl = last_zone.get("stop_loss")
+            if orig_sl is None:
+                # Fallback if explicit SL not set: use outer_top/outer_bottom
+                orig_sl = last_zone["outer_bottom"] if is_bull else last_zone["outer_top"]
+
+            sl_px = float(orig_sl)
+
+            # Recalculate target using actual entry (keeps 2.5:1 risk-reward)
+            risk = abs(actual_close - sl_px)
+            if risk < actual_close * 0.001:        # guard against near-zero risk
+                risk = actual_close * 0.005         # 0.5% fallback
+
+            RR = 2.5
+            tgt_px = round(actual_close + risk * RR, 2) if is_bull else round(actual_close - risk * RR, 2)
+            sl_px  = round(sl_px, 2)
+            entry_px = actual_close  # ← the price users actually see on the chart
+
+            # Build a patched zone dict that stores the execution price
+            last_zone_to_save = {
+                **last_zone,
+                "center_price": entry_px,   # execution price, matches chart
+                "stop_loss":    sl_px,
+                "target":       tgt_px,
+                # outer_top / outer_bottom aligned so history page fallback also matches
+                "outer_top":    tgt_px if is_bull else sl_px,
+                "outer_bottom": sl_px  if is_bull else tgt_px,
+            }
+
             # Save ONLY the last zone (the new signal) to DB
             db_symbol = self.binance_symbol.upper()
-            await self._save_signal_to_db(db_symbol, self.timeframe, last_zone)
+            await self._save_signal_to_db(db_symbol, self.timeframe, last_zone_to_save)
 
             # ── Email notifications are now sent automatically via Django signals ─
             # See reversal_zones/signals.py - sends INSTANT emails when signal is saved to DB
@@ -683,22 +732,22 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
 
             # Broadcast ONLY the single new signal, not all zones from window
-            # Broadcasting all zones caused duplicate/clustered markers on chart
             all_zones_out = [{
                 "is_bullish":   last_zone["is_bullish"],
-                "center_price": last_zone["center_price"],
-                "outer_top":    last_zone["outer_top"],
-                "outer_bottom": last_zone["outer_bottom"],
+                "center_price": entry_px,    # execution price (matches chart)
+                "outer_top":    tgt_px if is_bull else sl_px,
+                "outer_bottom": sl_px  if is_bull else tgt_px,
                 "core_top":     last_zone["core_top"],
                 "core_bottom":  last_zone["core_bottom"],
                 "timestamp":    ts_str,
                 "bar_index":    last_zone["bar_index"],
             }]
 
-            is_bull  = last_zone["is_bullish"]
-            entry_px = last_zone["center_price"]
-            sl_px    = last_zone["outer_bottom"] if is_bull else last_zone["outer_top"]
-            tgt_px   = last_zone["outer_top"]    if is_bull else last_zone["outer_bottom"]
+            logger.info(
+                "🔧 PRICE FIX [%s %s]: pivot=%.2f → entry=%.2f  SL=%.2f  TP=%.2f",
+                self.asset, self.timeframe,
+                float(pivot_price), entry_px, sl_px, tgt_px,
+            )
 
             signal_payload = {
                 "type":        "signal",

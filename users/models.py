@@ -56,6 +56,15 @@ class User(AbstractUser):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
+
+    # Timezone preference — set automatically from browser on every login.
+    # Used to format timestamps in email notifications to the user's local time.
+    timezone = models.CharField(
+        max_length=100,
+        default='UTC',
+        blank=True,
+        help_text='IANA timezone name (e.g. Asia/Kolkata). Set automatically from browser.'
+    )
     
     # Use email as username
     USERNAME_FIELD = 'email'

@@ -25,4 +25,7 @@ urlpatterns = [
     path('profile/', views.profile, name='profile'),
     path('profile/update/', views.update_profile, name='update_profile'),
     path('change-password/', views.change_password, name='change_password'),
+
+    # Timezone — auto-called from the frontend on every load
+    path('timezone/', views.update_timezone, name='update_timezone'),
 ]

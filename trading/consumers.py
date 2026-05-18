@@ -217,14 +217,16 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         Uses Binance.com (same data source as TradingView) for accurate candle matching.
         Frontend REST history also uses Binance.com for perfect data consistency.
         Auto-reconnects on disconnect with exponential backoff.
+        
+        NOTE: PAXGUSDT may be restricted from US-based servers (HTTP 451).
+        If you see repeated 451 errors, your server location is blocked by Binance.
+        Solution: Move server to non-US region (EU, Asia) or use VPN.
         """
         import aiohttp
         import json as _json
 
         symbol    = self.binance_symbol.lower()
         interval  = self.binance_interval
-        # Binance.com stream — same data source as TradingView for accurate candle colors
-        # Frontend REST also uses Binance.com for perfect OHLC consistency
         ws_url    = f"wss://stream.binance.com:9443/ws/{symbol}@kline_{interval}"
         backoff   = 1
 

@@ -77,20 +77,36 @@ def _professional_sl_target(
     timeframe: str = '5m',
 ) -> tuple[float, float]:
     """
-    Professional stop loss & target for real algo trading.
+    Professional stop loss & target for real algo trading with STRICT risk management.
 
     LOGIC:
     - Stop Loss BUY: Find previous GREEN candle where OPEN < current signal OPEN, 
                      use that candle's OPEN price as stop loss
     - Stop Loss SELL: Find previous RED candle where OPEN > current signal OPEN,
                       use that candle's OPEN price as stop loss
-    - Target: MINIMUM 0.4% profit (dynamic based on risk-reward, 0.4% is floor)
-    - Risk-Reward: 2.5:1 ratio
+    
+    STRICT RISK MANAGEMENT RULES (Production Trading):
+    - Stop Loss: MINIMUM 0.2%, MAXIMUM 0.5% from entry
+    - Target:    MINIMUM 0.4%, MAXIMUM 0.7% from entry
+    - Risk-Reward: 2.5:1 ratio (before applying caps)
+    
+    These caps ensure:
+    1. Stop loss never too tight (< 0.2%) - prevents premature stops
+    2. Stop loss never too wide (> 0.5%) - limits maximum loss
+    3. Target never too small (< 0.4%) - ensures minimum profit
+    4. Target never too large (> 0.7%) - realistic profit taking
     """
-    # ── Constants ────────────────────────────────────────────────────────
-    MIN_TARGET_PCT  = 0.004     # MINIMUM 0.4% target (floor, not static)
-    SL_BUFFER_PCT   = 0.005     # 0.5% buffer below/above swing point
-    RISK_REWARD     = 2.5       # 2.5:1 risk-reward ratio
+    # ── STRICT RISK MANAGEMENT CONSTANTS ─────────────────────────────────
+    # Stop Loss Constraints
+    MIN_SL_PCT      = 0.002     # MINIMUM 0.2% stop loss (prevent too tight)
+    MAX_SL_PCT      = 0.005     # MAXIMUM 0.5% stop loss (limit max loss)
+    
+    # Target Constraints
+    MIN_TARGET_PCT  = 0.004     # MINIMUM 0.4% target (ensure minimum profit)
+    MAX_TARGET_PCT  = 0.007     # MAXIMUM 0.7% target (realistic profit taking)
+    
+    # Calculation Parameters
+    RISK_REWARD     = 2.5       # 2.5:1 risk-reward ratio (before applying caps)
     LOOKBACK        = 50        # max candles to look back
     DOJI_THRESHOLD  = 0.001     # candle body < 0.1% of price = doji
 
@@ -125,24 +141,47 @@ def _professional_sl_target(
                 break
 
         if sl_level is None:
-            # Fallback: use entry price - 0.5%
-            sl_level = center_price * (1 - SL_BUFFER_PCT)
+            # Fallback: use entry price - 0.3% (middle of min/max range)
+            sl_level = center_price * (1 - 0.003)
 
+        # ── APPLY STRICT STOP LOSS CONSTRAINTS ──────────────────────────
+        # Calculate stop loss distance as percentage
+        sl_distance_pct = (center_price - sl_level) / center_price
+        
+        # Enforce MINIMUM 0.2% stop loss (prevent too tight)
+        if sl_distance_pct < MIN_SL_PCT:
+            sl_level = center_price * (1 - MIN_SL_PCT)
+            sl_distance_pct = MIN_SL_PCT
+        
+        # Enforce MAXIMUM 0.5% stop loss (limit max loss)
+        if sl_distance_pct > MAX_SL_PCT:
+            sl_level = center_price * (1 - MAX_SL_PCT)
+            sl_distance_pct = MAX_SL_PCT
+        
         stop_loss = sl_level
 
-        # ── Target: Dynamic with 0.4% minimum floor ──────────────────────
+        # ── CALCULATE TARGET WITH STRICT CONSTRAINTS ─────────────────────
+        # Calculate risk in absolute terms
         risk = center_price - stop_loss
         if risk <= 0:
-            risk = center_price * 0.005  # 0.5% fallback
+            risk = center_price * 0.003  # 0.3% fallback
 
         # Calculate risk-reward target (2.5:1) - this is the PRIMARY target
         rr_target = center_price + (risk * RISK_REWARD)
         
-        # Calculate minimum 0.4% target (floor only)
-        min_target = center_price * (1 + MIN_TARGET_PCT)
+        # Calculate target distance as percentage
+        target_distance_pct = (rr_target - center_price) / center_price
         
-        # Use risk-reward target, but ensure it's at least 0.4%
-        target = max(min_target, rr_target)
+        # Enforce MINIMUM 0.4% target (ensure minimum profit)
+        if target_distance_pct < MIN_TARGET_PCT:
+            target_distance_pct = MIN_TARGET_PCT
+        
+        # Enforce MAXIMUM 0.7% target (realistic profit taking)
+        if target_distance_pct > MAX_TARGET_PCT:
+            target_distance_pct = MAX_TARGET_PCT
+        
+        # Apply the constrained percentage to get final target
+        target = center_price * (1 + target_distance_pct)
 
     else:
         # ── SELL: Find previous RED candle where OPEN > current signal entry ──
@@ -168,24 +207,47 @@ def _professional_sl_target(
                 break
 
         if sl_level is None:
-            # Fallback: use entry price + 0.5%
-            sl_level = center_price * (1 + SL_BUFFER_PCT)
+            # Fallback: use entry price + 0.3% (middle of min/max range)
+            sl_level = center_price * (1 + 0.003)
 
+        # ── APPLY STRICT STOP LOSS CONSTRAINTS ──────────────────────────
+        # Calculate stop loss distance as percentage
+        sl_distance_pct = (sl_level - center_price) / center_price
+        
+        # Enforce MINIMUM 0.2% stop loss (prevent too tight)
+        if sl_distance_pct < MIN_SL_PCT:
+            sl_level = center_price * (1 + MIN_SL_PCT)
+            sl_distance_pct = MIN_SL_PCT
+        
+        # Enforce MAXIMUM 0.5% stop loss (limit max loss)
+        if sl_distance_pct > MAX_SL_PCT:
+            sl_level = center_price * (1 + MAX_SL_PCT)
+            sl_distance_pct = MAX_SL_PCT
+        
         stop_loss = sl_level
 
-        # ── Target: Dynamic with 0.4% minimum floor ──────────────────────
+        # ── CALCULATE TARGET WITH STRICT CONSTRAINTS ─────────────────────
+        # Calculate risk in absolute terms
         risk = stop_loss - center_price
         if risk <= 0:
-            risk = center_price * 0.005  # 0.5% fallback
+            risk = center_price * 0.003  # 0.3% fallback
 
         # Calculate risk-reward target (2.5:1) - this is the PRIMARY target
         rr_target = center_price - (risk * RISK_REWARD)
         
-        # Calculate minimum 0.4% target (floor only)
-        min_target = center_price * (1 - MIN_TARGET_PCT)
+        # Calculate target distance as percentage
+        target_distance_pct = (center_price - rr_target) / center_price
         
-        # Use risk-reward target, but ensure it's at least 0.4%
-        target = min(min_target, rr_target)
+        # Enforce MINIMUM 0.4% target (ensure minimum profit)
+        if target_distance_pct < MIN_TARGET_PCT:
+            target_distance_pct = MIN_TARGET_PCT
+        
+        # Enforce MAXIMUM 0.7% target (realistic profit taking)
+        if target_distance_pct > MAX_TARGET_PCT:
+            target_distance_pct = MAX_TARGET_PCT
+        
+        # Apply the constrained percentage to get final target
+        target = center_price * (1 - target_distance_pct)
 
     # Round to 2 decimal places for consistency
     stop_loss = round(stop_loss, 2)

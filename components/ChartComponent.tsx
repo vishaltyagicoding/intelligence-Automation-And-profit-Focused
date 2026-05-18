@@ -254,13 +254,13 @@ export default function ChartComponent({
     // BULLETPROOF DATA FEED - NEVER FAILS STRATEGY
     // 
     // Layer 1: Binance WebSocket (real-time, preferred)
-    // Layer 2: REST API polling (10 second intervals, automatic fallback)
+    // Layer 2: REST API polling (15 second intervals, automatic fallback)
     // Layer 3: Aggressive reconnection (infinite retries, exponential backoff)
     // 
     // GUARANTEE: Chart ALWAYS updates, user NEVER sees "Reconnecting"
     // 
-    // RATE LIMITING: REST API calls every 10 seconds to avoid Binance rate limits
-    // This prevents WebSocket failures caused by excessive API requests
+    // NOTE: REST API interval set to 15s (not 5s) to prevent rate limiting
+    // and reduce load on Binance API, which helps prevent WebSocket failures
     // ════════════════════════════════════════════════════════════════════════
     let binanceWs:         WebSocket | null = null;
     let binanceRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -271,7 +271,8 @@ export default function ChartComponent({
     let wsConnected        = false;
     let permanentRestMode  = false; // If WebSocket fails 10 times, use REST permanently
 
-    // REST API fallback - ALWAYS works, fetches latest candle every 5 seconds
+    // REST API fallback - ALWAYS works, fetches latest candle every 15 seconds
+    // Interval set to 15s (not 5s) to prevent Binance rate limiting
     const fetchRestCandle = async () => {
       if (gone.current) return;
       try {
@@ -319,14 +320,14 @@ export default function ChartComponent({
       
       // Only log once when REST fallback starts
       if (!permanentRestMode) {
-        console.log('📊 REST API fallback active - chart updates every 10s');
+        console.log('📊 REST API fallback active - chart updates every 15s');
       }
       
       // Immediate first fetch
       fetchRestCandle();
       
-      // Then fetch every 10 seconds (reduced from 5s to avoid rate limiting)
-      restFallbackInterval = setInterval(fetchRestCandle, 10000);
+      // Then fetch every 15 seconds (reduced from 5s to prevent rate limiting)
+      restFallbackInterval = setInterval(fetchRestCandle, 15000);
     };
 
     const stopRestFallback = () => {

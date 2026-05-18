@@ -63,7 +63,7 @@ jobs:
                 cat > .env << 'ENVFILE'
           SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
           DEBUG=False
-          ALLOWED_HOSTS=smartriskfx.com,www.smartriskfx.com,54.183.178.141,localhost,127.0.0.1
+          ALLOWED_HOSTS=smartriskfx.com,www.smartriskfx.com,13.250.19.107,localhost,127.0.0.1
           CSRF_TRUSTED_ORIGINS=https://smartriskfx.com,https://www.smartriskfx.com
           DB_NAME=smartrisk_db
           DB_USER=smartrisk_user

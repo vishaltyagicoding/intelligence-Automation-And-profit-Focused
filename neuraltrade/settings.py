@@ -348,8 +348,10 @@ CELERY_BEAT_SCHEDULE.update({
         'task':     'reversal_zones.tasks.calculate_all_history',
         'schedule': crontab(hour=0, minute=30),
     },
-    'update-all-recent-signals-every-30min': {
-        'task':     'reversal_zones.tasks.update_all_recent_signals',
-        'schedule': crontab(minute='*/30'),
-    },
+    # DISABLED: This task was creating FALSE signals that don't match live chart
+    # WebSocket live signals are the ONLY source of truth now
+    # 'update-all-recent-signals-every-30min': {
+    #     'task':     'reversal_zones.tasks.update_all_recent_signals',
+    #     'schedule': crontab(minute='*/30'),
+    # },
 })

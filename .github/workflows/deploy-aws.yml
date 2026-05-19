@@ -209,8 +209,17 @@ jobs:
           from django_celery_beat.models import PeriodicTask, IntervalSchedule, CrontabSchedule
           interval, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.MINUTES)
           PeriodicTask.objects.update_or_create(name='check-expired-subscriptions', defaults={'task': 'users.tasks.check_and_expire_subscriptions', 'interval': interval, 'enabled': True})
-          cron, _ = CrontabSchedule.objects.get_or_create(minute='*/15', hour='*', day_of_week='*', day_of_month='*', month_of_year='*', timezone='Asia/Kolkata')
-          PeriodicTask.objects.update_or_create(name='update-all-recent-signals-every-15min', defaults={'task': 'reversal_zones.tasks.update_all_recent_signals', 'crontab': cron, 'enabled': True})
+          # DISABLED: This task was creating FALSE signals that don't match live chart
+          # WebSocket live signals are the ONLY source of truth now
+          # cron, _ = CrontabSchedule.objects.get_or_create(minute='*/15', hour='*', day_of_week='*', day_of_month='*', month_of_year='*', timezone='Asia/Kolkata')
+          # PeriodicTask.objects.update_or_create(name='update-all-recent-signals-every-15min', defaults={'task': 'reversal_zones.tasks.update_all_recent_signals', 'crontab': cron, 'enabled': True})
+          # Disable the task if it exists
+          try:
+              task = PeriodicTask.objects.get(name='update-all-recent-signals-every-15min')
+              task.enabled = False
+              task.save()
+          except PeriodicTask.DoesNotExist:
+              pass
           PYEOF
           EOF
 

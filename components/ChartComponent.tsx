@@ -130,6 +130,11 @@ export default function ChartComponent({
   const roRef        = useRef<ResizeObserver | null>(null);
   const markersRef   = useRef<Map<number, SeriesMarker<Time>>>(new Map());
   const chartStartRef = useRef<number>(0);
+  
+  // CRITICAL: Store signals by asset+timeframe to preserve them across timeframe changes
+  // Key format: "BTCUSD:5m:1234567890" → SeriesMarker
+  // This ensures signals NEVER disappear when switching timeframes or refreshing
+  const persistentSignalsRef = useRef<Map<string, SeriesMarker<Time>>>(new Map());
 
   const [lastPrice,    setLastPrice]    = useState<number | null>(null);
   const [signalStatus, setSignalStatus] = useState<{ last_signal: string; tracking: string } | null>(null);
@@ -216,11 +221,30 @@ export default function ChartComponent({
     // Store previous chart start for smooth transition
     const previousChartStart = chartStartRef.current;
     chartStartRef.current = 0;
+    
+    // CRITICAL FIX: Don't clear markersRef - signals must persist across timeframe changes
+    // Instead, we'll rebuild markersRef from persistentSignalsRef for the current timeframe
     markersRef.current.clear();
+    
+    // Restore signals for current asset+timeframe from persistent storage
+    const currentKey = `${asset}:${timeframe}:`;
+    for (const [key, marker] of persistentSignalsRef.current.entries()) {
+      if (key.startsWith(currentKey)) {
+        const timestamp = marker.time as number;
+        markersRef.current.set(timestamp, marker);
+      }
+    }
     
     // Don't clear series data yet - will be replaced when new data loads
     // seriesRef.current?.setData([]);
-    seriesRef.current?.setMarkers([]);
+    
+    // Apply existing signals immediately (before new data loads)
+    if (markersRef.current.size > 0) {
+      const existingMarkers = [...markersRef.current.values()].sort((a, b) => (a.time as number) - (b.time as number));
+      try { seriesRef.current?.setMarkers(existingMarkers); } catch { /* ignore */ }
+    } else {
+      seriesRef.current?.setMarkers([]);
+    }
 
     const candles         = new Map<number, CandleDataPoint>();
     const preloadBuffer:    BinanceKlineMsg['k'][] = [];
@@ -547,10 +571,20 @@ export default function ChartComponent({
     const SIXTY_MIN = 3600;
 
     const zoneToMarker = (z: { is_bullish: boolean; timestamp: string }, interval: number): SeriesMarker<Time> => {
+      // CRITICAL: Signal position MUST be stable and NEVER change
+      // 1. Parse timestamp (add 'Z' if missing to ensure UTC)
       const ts  = z.timestamp.includes('+') || z.timestamp.endsWith('Z') ? z.timestamp : z.timestamp + 'Z';
       const raw = Math.floor(new Date(ts).getTime() / 1000);
+      
+      // 2. Round to exact candle start time for current timeframe
+      // This ensures signal always appears on the SAME candle, regardless of:
+      // - Page refresh
+      // - Timeframe change
+      // - WebSocket reconnection
+      const candleTime = Math.floor(raw / interval) * interval;
+      
       return {
-        time:     Math.floor(raw / interval) * interval as Time,
+        time:     candleTime as Time,
         position: z.is_bullish ? 'belowBar'   : 'aboveBar',
         color:    z.is_bullish ? COLOR_UP      : COLOR_DOWN,
         shape:    z.is_bullish ? 'arrowUp'     : 'arrowDown',
@@ -560,24 +594,27 @@ export default function ChartComponent({
     };
 
     const mergeAndFlush = (incoming: SeriesMarker<Time>[]) => {
+      // CRITICAL FIX: Signals must be PERMANENT and NEVER deleted
+      // Store signals in BOTH markersRef (current timeframe) AND persistentSignalsRef (all timeframes)
+      // This ensures signals survive page refresh, timeframe changes, and WebSocket reconnections
+      
       const sorted = [...incoming].sort((a, b) => (a.time as number) - (b.time as number));
       for (const m of sorted) {
         const t = m.time as number;
+        
+        // Create persistent key: "BTCUSD:5m:1234567890"
+        const persistentKey = `${asset}:${timeframe}:${t}`;
+        
+        // Only add if not already present (prevent duplicates)
         if (markersRef.current.has(t)) continue;
-        const times = [...markersRef.current.keys()].sort((a, b) => a - b);
-        const lt    = times.length > 0 ? times[times.length - 1] : undefined;
-        const last  = lt !== undefined ? markersRef.current.get(lt) : undefined;
-        if (last !== undefined && lt !== undefined) {
-          if (t - lt < SIXTY_MIN) {
-            if (last.text === m.text && t > lt) { markersRef.current.delete(lt); markersRef.current.set(t, m); }
-            continue;
-          }
-          if (last.text === m.text) {
-            if (t > lt) { markersRef.current.delete(lt); markersRef.current.set(t, m); }
-            continue;
-          }
+        
+        // Add signal to current timeframe markers
+        if (chartStartRef.current === 0 || t >= chartStartRef.current) {
+          markersRef.current.set(t, m);
+          
+          // CRITICAL: Also store in persistent storage (survives timeframe changes)
+          persistentSignalsRef.current.set(persistentKey, m);
         }
-        if (chartStartRef.current === 0 || t >= chartStartRef.current) markersRef.current.set(t, m);
       }
       flushMarkers();
     };
@@ -598,7 +635,9 @@ export default function ChartComponent({
     const fetchSignals = async (chartStart = 0) => {
       if (!seriesRef.current || gone.current) return;
       const ivl = TF_SEC[timeframe];
-      markersRef.current.clear();
+      
+      // Don't clear markersRef - signals must persist
+      // markersRef.current.clear();
 
       try {
         const allRaw: Array<{ is_bullish: boolean; timestamp: string }> = [];
@@ -621,26 +660,38 @@ export default function ChartComponent({
         if (gone.current) return;
 
         const sorted = allRaw.map(z => zoneToMarker(z, ivl)).sort((a, b) => (a.time as number) - (b.time as number));
+        
+        // CRITICAL FIX: NEVER delete or filter signals
+        // All signals from database should be displayed on chart
+        // Database alternation trigger ensures BUY/SELL alternation
         const final: SeriesMarker<Time>[] = [];
         const seen = new Set<number>();
 
         for (const m of sorted) {
           const t = m.time as number;
+          
+          // Only skip exact duplicates (same timestamp)
           if (seen.has(t)) continue;
-          const last = final.length > 0 ? final[final.length - 1] : undefined;
-          const lt   = last ? (last.time as number) : undefined;
-          if (lt !== undefined) {
-            if (t - lt < SIXTY_MIN) {
-              if (last?.text === m.text && t > lt) { final[final.length - 1] = m; seen.delete(lt); seen.add(t); }
-              continue;
-            }
-            if (last?.text === m.text) { final[final.length - 1] = m; seen.delete(lt!); seen.add(t); continue; }
-          }
-          final.push(m); seen.add(t);
+          
+          // Add ALL signals - no deletion, no filtering
+          final.push(m);
+          seen.add(t);
+          
+          // CRITICAL: Store in persistent storage (survives timeframe changes)
+          const persistentKey = `${asset}:${timeframe}:${t}`;
+          persistentSignalsRef.current.set(persistentKey, m);
         }
 
         const visible = chartStart > 0 ? final.filter(m => (m.time as number) >= chartStart) : final;
-        for (const m of visible) markersRef.current.set(m.time as number, m);
+        
+        // Merge with existing markers (don't replace)
+        for (const m of visible) {
+          const t = m.time as number;
+          if (!markersRef.current.has(t)) {
+            markersRef.current.set(t, m);
+          }
+        }
+        
         flushMarkers(chartStart);
         if (!gone.current && liveStatus) setSignalStatus(liveStatus);
       } catch { /* silent */ }

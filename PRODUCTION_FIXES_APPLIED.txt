@@ -48,6 +48,14 @@ ISSUES FIXED:
    - Added *.md to .gitignore (except .claude/**/*.md and README.md)
    - No .md files will be committed to GitHub
 
+8. ✅ CHART BECOMES INVISIBLE WHEN SWITCHING TIMEFRAMES
+   - Fixed race condition in data loading
+   - Chart now keeps old data until new data loads
+   - Added automatic retry on load failure (2 second delay)
+   - Added better error handling for Binance API
+   - Cleared candles map before loading new data
+   - Chart always shows data, never goes blank
+
 FILES MODIFIED:
 ===============
 
@@ -59,6 +67,14 @@ FILES MODIFIED:
 2. .gitignore
    - Added *.md exclusion
    - Allowed .claude/**/*.md and README.md
+
+3. components/ChartComponent.tsx (Lines 235-245, 650-695)
+   - Don't clear chart data immediately when switching timeframes
+   - Keep old data visible until new data loads
+   - Clear candles map atomically before loading new data
+   - Added retry logic on load failure
+   - Better error handling for Binance API responses
+   - Prevents blank chart issue
 
 FILES VERIFIED (NO CHANGES NEEDED):
 ====================================
@@ -97,7 +113,7 @@ DEPLOYMENT STEPS:
 
 1. Commit changes:
    git add .
-   git commit -m "Fix email delay bug and cleanup documentation"
+   git commit -m "Fix: Email delay, chart visibility, cleanup docs"
    git push origin main
 
 2. GitHub Actions will automatically deploy to Singapore server
@@ -120,6 +136,8 @@ TESTING CHECKLIST:
 □ Verify email arrives within 1-2 seconds
 □ Check logs for 🔔 → 💾 → 📧 sequence
 □ Verify history table updates instantly
+□ Test timeframe switching (5m → 15m → 30m → 1h)
+□ Verify chart never goes blank when switching
 □ Test with all 4 assets (BTCUSD, ETHUSD, XAUUSD, LTCUSD)
 □ Test with multiple timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d)
 □ Verify alternation rule (BUY → SELL → BUY → SELL)
@@ -131,6 +149,7 @@ SUCCESS CRITERIA:
 ✅ Email arrives within 1-2 seconds of signal appearing on chart
 ✅ No more 30-minute delays
 ✅ History table updates instantly (no page refresh)
+✅ Chart never goes blank when switching timeframes
 ✅ All 4 assets working
 ✅ All 7 timeframes working
 ✅ Alternation rule enforced

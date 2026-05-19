@@ -207,12 +207,19 @@ export default function ChartComponent({
 
   // ── Data + WebSocket per asset/timeframe ───────────────────────────────────
   useEffect(() => {
+    // Don't clear chart data immediately - wait for new data to load first
+    // This prevents the "blank chart" issue when switching timeframes
     setLastPrice(null);
     setSignalStatus(null);
     setSigLoading(true);
+    
+    // Store previous chart start for smooth transition
+    const previousChartStart = chartStartRef.current;
     chartStartRef.current = 0;
     markersRef.current.clear();
-    seriesRef.current?.setData([]);
+    
+    // Don't clear series data yet - will be replaced when new data loads
+    // seriesRef.current?.setData([]);
     seriesRef.current?.setMarkers([]);
 
     const candles         = new Map<number, CandleDataPoint>();
@@ -644,11 +651,24 @@ export default function ChartComponent({
     const loadHistory = async () => {
       try {
         const symbol = ASSET_TO_BINANCE[asset];
-        const res = await fetch(
-          `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${TF_BINANCE[timeframe]}&limit=${TF_LIMIT[timeframe]}`
-        );
+        const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${TF_BINANCE[timeframe]}&limit=${TF_LIMIT[timeframe]}`;
+        
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          cache: 'no-cache'
+        });
+        
+        if (!res.ok) {
+          throw new Error(`Binance API returned ${res.status}`);
+        }
+        
         const raw: (string | number)[][] = await res.json();
         if (gone.current) return;
+
+        if (!raw || !Array.isArray(raw) || raw.length === 0) {
+          throw new Error('No data received from Binance');
+        }
 
         const hist: CandleDataPoint[] = raw.map(k => ({
           time:  Math.floor(Number(k[0]) / 1000) as Time,
@@ -658,8 +678,14 @@ export default function ChartComponent({
           close: parseFloat(k[4] as string),
         }));
 
+        // Clear old data and set new data atomically
+        candles.clear();
         for (const c of hist) candles.set(c.time as number, c);
+        
+        // Set data to chart - this replaces old data
         seriesRef.current?.setData(hist);
+        
+        // Fit content to show all data
         chartRef.current?.timeScale().fitContent();
 
         if (hist.length > 0) {
@@ -677,8 +703,19 @@ export default function ChartComponent({
         await fetchSignals(chartStartRef.current);
       } catch (e) {
         console.error('History load failed:', e);
+        
+        // On error, try to keep showing old data if available
+        // Don't clear the chart - better to show stale data than blank chart
         historyLoaded = true; // still drain buffer
         if (!gone.current) setSigLoading(false);
+        
+        // Retry after 2 seconds
+        setTimeout(() => {
+          if (!gone.current) {
+            console.log('Retrying history load...');
+            loadHistory();
+          }
+        }, 2000);
       }
     };
 

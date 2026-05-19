@@ -615,61 +615,35 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             new_signal  = "BUY" if last_zone["is_bullish"] else "SELL"
             
             # ═══════════════════════════════════════════════════════════════════
-            # CRITICAL: Check ALTERNATION with last DB signal FIRST
-            # After SELL, only BUY is allowed. After BUY, only SELL is allowed.
-            # This is the MOST IMPORTANT trading rule.
+            # CRITICAL FIX: Let DATABASE handle ALL constraints (alternation, timing)
+            # 
+            # OLD PROBLEM: WebSocket had multiple blocking checks:
+            #   1. Alternation check (BUY/SELL must alternate)
+            #   2. 1-hour minimum gap check
+            #   3. Fingerprint check (duplicate prevention)
+            #
+            # If ANY check failed, signal was NOT saved to DB → NO email sent
+            # Then 30-min Celery task found it later → email sent 30 min late
+            #
+            # NEW SOLUTION: Only check fingerprint (prevent duplicate broadcasts),
+            # then ALWAYS save to DB. Database trigger handles alternation.
+            # This ensures INSTANT email delivery via Django signal handler.
             # ═══════════════════════════════════════════════════════════════════
-            db_symbol = self.binance_symbol.upper()
-            last_db_signal = await self._get_last_db_signal(db_symbol, self.timeframe)
             
-            if last_db_signal and last_db_signal == new_signal:
-                logger.info(
-                    "🚫 WebSocket ALTERNATION BLOCKED [%s %s]: %s @ %.2f "
-                    "(last DB signal was %s - signals must alternate)",
-                    self.asset, self.timeframe, new_signal,
-                    last_zone["center_price"], last_db_signal
-                )
-                return  # Do NOT broadcast — violates alternation rule
-            
-            # ── Check 1-hour minimum gap BEFORE broadcasting ──────────────────
-            # Get the timestamp of the new signal
-            ts = last_zone["timestamp"]
-            if hasattr(ts, "timestamp"):
-                new_signal_ts = ts.timestamp()  # pd.Timestamp → Unix seconds
-            elif isinstance(ts, str):
-                import dateutil.parser
-                new_signal_ts = dateutil.parser.parse(ts).timestamp()
-            else:
-                new_signal_ts = float(ts)
-            
-            # Check last broadcast timestamp from Redis
-            time_cache_key = f"signal:last_time:{self.asset}:{self.timeframe}"
-            last_broadcast_ts_str = await self.redis_client.get(time_cache_key)
-            
-            if last_broadcast_ts_str:
-                last_broadcast_ts = float(last_broadcast_ts_str)
-                minutes_since = (new_signal_ts - last_broadcast_ts) / 60.0
-                
-                # STRICT: Minimum 60 minutes between ANY two signals
-                if minutes_since < 60.0:
-                    logger.debug(
-                        "⏸️ WebSocket broadcast BLOCKED [%s %s]: %s @ %.2f "
-                        "(%.1f min < 60 min required since last signal)",
-                        self.asset, self.timeframe, new_signal,
-                        last_zone["center_price"], minutes_since
-                    )
-                    return  # Do NOT broadcast — too soon
-            
-            # Also check fingerprint to avoid re-broadcasting the exact same signal
+            # Only check fingerprint to avoid re-broadcasting the exact same signal
             fingerprint = f"{new_signal}:{last_zone['bar_index']}"
             cache_key   = f"signal:last:{self.asset}:{self.timeframe}"
             last_known  = await self.redis_client.get(cache_key)
 
             if last_known == fingerprint:
-                return  # Already broadcast this signal
+                logger.debug(
+                    "⏸️ WebSocket duplicate BLOCKED [%s %s]: %s @ %.2f (bar=%d) - already broadcast",
+                    self.asset, self.timeframe, new_signal,
+                    last_zone["center_price"], last_zone['bar_index']
+                )
+                return  # Already broadcast this exact signal
 
-            # All checks passed — store timestamp and fingerprint
-            await self.redis_client.set(time_cache_key, str(new_signal_ts), ex=86400)
+            # Store fingerprint (expires in 24 hours)
             await self.redis_client.set(cache_key, fingerprint, ex=86400)
 
             # ══════════════════════════════════════════════════════════════════

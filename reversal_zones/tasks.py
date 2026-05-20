@@ -153,10 +153,12 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
     Uses update_or_create on (symbol, timeframe, reversal_time).
     Returns count of newly created records.
     
-    ALTERNATION ENFORCEMENT:
-    - Before saving any signal, check the last saved signal in DB
-    - If new signal has same label (BUY→BUY or SELL→SELL), SKIP IT
-    - This ensures PERFECT alternation: BUY → SELL → BUY → SELL
+    ALTERNATION ENFORCEMENT (MULTI-LAYER):
+    1. Get the last saved signal from DB (before processing batch)
+    2. Track the last label saved WITHIN this batch
+    3. Before saving any signal, check BOTH DB and batch history
+    4. If new signal has same label (BUY→BUY or SELL→SELL), SKIP IT
+    5. This ensures PERFECT alternation: BUY → SELL → BUY → SELL
     
     NOTE: Email notifications are now sent automatically via Django signals
     (reversal_zones/signals.py) when new signals are created. This ensures
@@ -167,6 +169,18 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
 
     saved = 0
     skipped_violations = 0
+    
+    # ── Get the LAST signal from DB (before processing this batch) ────────────
+    last_db_signal = (
+        ReversalZone.objects
+        .filter(symbol=symbol, timeframe=timeframe)
+        .order_by("-reversal_time")
+        .values("label_text", "reversal_time")
+        .first()
+    )
+    
+    # Track the last label saved in THIS batch (for within-batch alternation check)
+    last_saved_label = last_db_signal["label_text"] if last_db_signal else None
     
     # Sort zones by timestamp to process in chronological order
     zones_sorted = sorted(zones, key=lambda z: z.get("timestamp") or z.get("reversal_time"))
@@ -190,20 +204,12 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
             is_bull = z.get("is_bullish", True)
             new_label = "BUY" if is_bull else "SELL"
 
-            # ── ALTERNATION CHECK: Get last saved signal ──────────────────────
-            last_signal = (
-                ReversalZone.objects
-                .filter(symbol=symbol, timeframe=timeframe)
-                .order_by("-reversal_time")
-                .values("label_text", "reversal_time")
-                .first()
-            )
-
-            # If last signal has SAME label, SKIP this signal (enforce alternation)
-            if last_signal and last_signal["label_text"] == new_label:
+            # ── ALTERNATION CHECK: Compare with last saved label ──────────────
+            # Check against BOTH: last DB signal AND last signal saved in this batch
+            if last_saved_label == new_label:
                 logger.warning(
                     "🛡️ ALTERNATION VIOLATION BLOCKED: %s→%s at %s [%s %s]",
-                    last_signal["label_text"],
+                    last_saved_label,
                     new_label,
                     reversal_time.strftime("%Y-%m-%d %H:%M:%S"),
                     symbol,
@@ -230,6 +236,8 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
             )
             if created:
                 saved += 1
+                # Update last_saved_label for next iteration (within-batch tracking)
+                last_saved_label = new_label
                 logger.info(
                     "✅ Signal saved: %s at %s [%s %s]",
                     new_label,

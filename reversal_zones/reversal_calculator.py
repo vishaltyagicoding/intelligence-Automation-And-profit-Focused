@@ -15,10 +15,13 @@ Workflow:
 """
 from __future__ import annotations
 import math
+import logging
 from dataclasses import dataclass
 from typing import List, Optional
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -556,7 +559,33 @@ class ReversalZoneCalculator:
                        atr_now: float,
                        zone_center: float,
                        timestamp=None):
-        """Build a ReversalEvent and append it to self.reversals."""
+        """
+        Build a ReversalEvent and append it to self.reversals.
+        
+        CRITICAL ALTERNATION CHECK:
+        Before emitting any reversal, check if the last reversal has the SAME direction.
+        If so, SKIP this reversal (this should NEVER happen if swing logic is correct,
+        but this is a safety net to prevent consecutive BUY→BUY or SELL→SELL).
+        """
+        # ── SAFETY CHECK: Prevent consecutive signals of same type ────────────
+        if self.reversals:
+            last_reversal = self.reversals[-1]
+            if last_reversal.is_bullish == is_bullish:
+                # This should NEVER happen if swing_dir logic is correct
+                # But if it does, log it and SKIP this reversal
+                signal_type = "BUY" if is_bullish else "SELL"
+                logger.warning(
+                    "⚠️ CALCULATOR BUG: Attempted to emit consecutive %s signals at bar %d (price %.2f). "
+                    "Last signal was at bar %d (price %.2f). SKIPPING to enforce alternation.",
+                    signal_type,
+                    bar_index,
+                    center_price,
+                    last_reversal.bar_index,
+                    last_reversal.price
+                )
+                return  # SKIP this reversal
+        
+        # ── Emit reversal (alternation is valid) ──────────────────────────────
         core_half  = max(atr_now * 0.12, abs(center_price) * 0.00015)
         outer_half = core_half * 2.15
         zone_half  = (zone_center * self.cfg.zone_thickness_pct / 100.0) / 2.0

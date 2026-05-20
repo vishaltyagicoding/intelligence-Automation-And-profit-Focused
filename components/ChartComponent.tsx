@@ -140,7 +140,16 @@ export default function ChartComponent({
   const [signalStatus, setSignalStatus] = useState<{ last_signal: string; tracking: string } | null>(null);
   const [sigLoading,   setSigLoading]   = useState(false);
 
+  // Get user's timezone and offset
   const userTZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const userTZOffset = new Date().getTimezoneOffset() * 60; // offset in seconds (negative for ahead of UTC)
+  
+  // Helper: Convert UTC timestamp to local timestamp for chart display
+  // lightweight-charts always displays timestamps as UTC, so we need to shift them
+  // by the user's timezone offset to make them appear in local time
+  const utcToLocalTime = (utcSeconds: number): number => {
+    return utcSeconds - userTZOffset; // subtract because getTimezoneOffset is negative for ahead of UTC
+  };
 
   // ── Create chart once ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -168,11 +177,12 @@ export default function ChartComponent({
       },
       localization: {
         timeFormatter: (sec: number) => {
-          // Format time in user's local timezone for BOTH timeline and crosshair
+          // Timestamps are already converted to local time, so just format them
+          // WITHOUT timezone conversion (otherwise it would double-convert)
           return new Intl.DateTimeFormat(undefined, {
             year: '2-digit', month: '2-digit', day: '2-digit',
             hour: '2-digit', minute: '2-digit', hour12: false,
-            timeZone: userTZ,
+            timeZone: 'UTC', // Use UTC because timestamps are already adjusted
           }).format(new Date(sec * 1000)).replace(',', '');
         },
       },
@@ -264,7 +274,7 @@ export default function ChartComponent({
     // ── Apply one Binance kline tick to the chart ─────────────────────────────
     const applyKline = (k: BinanceKlineMsg['k']) => {
       const interval = TF_SEC[timeframe];
-      const start    = Math.floor(k.t / 1000 / interval) * interval;
+      const start    = utcToLocalTime(Math.floor(k.t / 1000 / interval) * interval);
       const open     = toFloat(k.o);
       const high     = toFloat(k.h);
       const low      = toFloat(k.l);
@@ -585,8 +595,11 @@ export default function ChartComponent({
       // - WebSocket reconnection
       const candleTime = Math.floor(raw / interval) * interval;
       
+      // 3. Convert to local time for chart display
+      const localTime = utcToLocalTime(candleTime);
+      
       return {
-        time:     candleTime as Time,
+        time:     localTime as Time,
         position: z.is_bullish ? 'belowBar'   : 'aboveBar',
         color:    z.is_bullish ? COLOR_UP      : COLOR_DOWN,
         shape:    z.is_bullish ? 'arrowUp'     : 'arrowDown',
@@ -724,7 +737,7 @@ export default function ChartComponent({
         }
 
         const hist: CandleDataPoint[] = raw.map(k => ({
-          time:  Math.floor(Number(k[0]) / 1000) as Time,
+          time:  utcToLocalTime(Math.floor(Number(k[0]) / 1000)) as Time,
           open:  parseFloat(k[1] as string),
           high:  parseFloat(k[2] as string),
           low:   parseFloat(k[3] as string),

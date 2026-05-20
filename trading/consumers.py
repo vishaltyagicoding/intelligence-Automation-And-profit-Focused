@@ -725,12 +725,24 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             tgt_px = round(tgt_px, 2)
             entry_px = actual_close  # ← the price users actually see on the chart
 
+            # ═══════════════════════════════════════════════════════════════════
+            # CRITICAL FIX: Use CURRENT candle timestamp, NOT pivot timestamp
+            # 
+            # PROBLEM: last_zone["timestamp"] is the PIVOT timestamp (when pivot formed)
+            # This could be 30-40 minutes old, causing emails to show old timestamps
+            # 
+            # SOLUTION: Use the CURRENT (most recent) candle's timestamp
+            # This is the CONFIRMATION time when the signal is actually detected
+            # ═══════════════════════════════════════════════════════════════════
+            current_candle_timestamp = df.index[-1]  # Most recent candle timestamp
+            
             # Build a patched zone dict that stores the execution price
             last_zone_to_save = {
                 **last_zone,
                 "center_price": entry_px,   # execution price, matches chart
                 "stop_loss":    sl_px,
                 "target":       tgt_px,
+                "timestamp":    current_candle_timestamp,  # ← CURRENT time, not pivot time
                 # outer_top / outer_bottom aligned so history page fallback also matches
                 "outer_top":    tgt_px if is_bull else sl_px,
                 "outer_bottom": sl_px  if is_bull else tgt_px,
@@ -745,7 +757,8 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             # This ensures users receive alerts at the EXACT moment the signal fires,
             # regardless of WebSocket connection status.
 
-            ts = last_zone["timestamp"]
+            # Use CURRENT candle timestamp for broadcast (not pivot timestamp)
+            ts = current_candle_timestamp
             ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
 
             # Broadcast ONLY the single new signal, not all zones from window

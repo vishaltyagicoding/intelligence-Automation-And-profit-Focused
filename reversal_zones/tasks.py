@@ -149,9 +149,14 @@ def _get_last_db_signal(symbol: str, timeframe: str) -> dict | None:
 
 def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
     """
-    Bulk-save filtered zones to DB.
+    Bulk-save filtered zones to DB with STRICT alternation enforcement.
     Uses update_or_create on (symbol, timeframe, reversal_time).
     Returns count of newly created records.
+    
+    ALTERNATION ENFORCEMENT:
+    - Before saving any signal, check the last saved signal in DB
+    - If new signal has same label (BUY→BUY or SELL→SELL), SKIP IT
+    - This ensures PERFECT alternation: BUY → SELL → BUY → SELL
     
     NOTE: Email notifications are now sent automatically via Django signals
     (reversal_zones/signals.py) when new signals are created. This ensures
@@ -161,8 +166,12 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
     from django.db import IntegrityError
 
     saved = 0
+    skipped_violations = 0
     
-    for z in zones:
+    # Sort zones by timestamp to process in chronological order
+    zones_sorted = sorted(zones, key=lambda z: z.get("timestamp") or z.get("reversal_time"))
+    
+    for z in zones_sorted:
         try:
             ts = z.get("timestamp") or z.get("reversal_time")
             if isinstance(ts, str):
@@ -179,7 +188,31 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
                 reversal_time = pytz.utc.localize(reversal_time)
 
             is_bull = z.get("is_bullish", True)
+            new_label = "BUY" if is_bull else "SELL"
 
+            # ── ALTERNATION CHECK: Get last saved signal ──────────────────────
+            last_signal = (
+                ReversalZone.objects
+                .filter(symbol=symbol, timeframe=timeframe)
+                .order_by("-reversal_time")
+                .values("label_text", "reversal_time")
+                .first()
+            )
+
+            # If last signal has SAME label, SKIP this signal (enforce alternation)
+            if last_signal and last_signal["label_text"] == new_label:
+                logger.warning(
+                    "🛡️ ALTERNATION VIOLATION BLOCKED: %s→%s at %s [%s %s]",
+                    last_signal["label_text"],
+                    new_label,
+                    reversal_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    symbol,
+                    timeframe
+                )
+                skipped_violations += 1
+                continue  # SKIP this signal
+
+            # ── Save signal (alternation is valid) ────────────────────────────
             zone, created = ReversalZone.objects.update_or_create(
                 symbol        = symbol,
                 timeframe     = timeframe,
@@ -191,20 +224,36 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
                     "core_top":     z["core_top"],
                     "core_bottom":  z["core_bottom"],
                     "is_bullish":   is_bull,
-                    "label_text":   "BUY" if is_bull else "SELL",
+                    "label_text":   new_label,
                     "bar_index":    z.get("bar_index", 0),
                 },
             )
             if created:
                 saved += 1
+                logger.info(
+                    "✅ Signal saved: %s at %s [%s %s]",
+                    new_label,
+                    reversal_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    symbol,
+                    timeframe
+                )
                 # Email is sent automatically by Django signal (reversal_zones/signals.py)
 
         except (IntegrityError, Exception) as e:
             msg = str(e)
             if "Consecutive" in msg and "signals not allowed" in msg:
                 logger.info("🛡️ DB constraint blocked consecutive signal [%s %s]", symbol, timeframe)
+                skipped_violations += 1
             else:
                 logger.error("Error saving zone [%s %s]: %s", symbol, timeframe, e)
+
+    if skipped_violations > 0:
+        logger.info(
+            "🛡️ Alternation enforcement: skipped %d violations [%s %s]",
+            skipped_violations,
+            symbol,
+            timeframe
+        )
 
     return saved
 

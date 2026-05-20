@@ -1,0 +1,84 @@
+================================================================================
+FIX FAKE SIGNALS - CLEANUP INSTRUCTIONS
+================================================================================
+
+PROBLEM: BUY→BUY and SELL→SELL violations visible on chart for all cryptos
+
+SOLUTION: 
+1. Code deployed with alternation enforcement (prevents future violations)
+2. Run cleanup script to remove existing violations from database
+
+================================================================================
+STEP 1: Wait for GitHub Actions Deployment
+================================================================================
+
+1. Go to: https://github.com/vishaltyagicoding/intelligence-Automation-And-profit-Focused/actions
+2. Wait for "Deploy to AWS" workflow to complete (green checkmark)
+3. This deploys the new code with alternation enforcement
+
+================================================================================
+STEP 2: SSH to Singapore Server
+================================================================================
+
+ssh -i smartriskfx-singapore.pem ubuntu@13.250.19.107
+cd ~/smartrisk
+
+================================================================================
+STEP 3: Run Cleanup Script (EASY METHOD)
+================================================================================
+
+sudo docker-compose exec django python run_cleanup_on_server.py
+
+This will:
+- Scan all 4 cryptos (BTCUSDT, ETHUSDT, PAXGUSDT, LTCUSDT)
+- Scan all 7 timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d)
+- Find all BUY→BUY and SELL→SELL violations (last 30 days)
+- Delete the violating signals
+- Show summary of what was cleaned
+
+================================================================================
+STEP 4: Restart Celery (Apply New Alternation Enforcement)
+================================================================================
+
+sudo docker-compose restart celery_beat celery_worker
+
+Wait 30 seconds, then check status:
+
+sudo docker-compose ps
+
+Both celery_beat and celery_worker should show "Up" and "(healthy)"
+
+================================================================================
+STEP 5: Verify Fix
+================================================================================
+
+1. Open dashboard: https://smartriskfx.com/dashboard
+2. Check all cryptos: BTCUSD, ETHUSD, XAUUSD, LTCUSD
+3. Check all timeframes: 5m, 15m, 30m, 1h, 2h, 4h, 1d
+4. Verify signals alternate: BUY → SELL → BUY → SELL
+
+Expected results:
+✅ No BUY→BUY violations
+✅ No SELL→SELL violations
+✅ All signals alternate perfectly
+
+================================================================================
+MONITORING (Optional)
+================================================================================
+
+Check if violations are being blocked (this is GOOD):
+
+sudo docker-compose logs celery_worker | grep "ALTERNATION VIOLATION"
+
+If you see "ALTERNATION VIOLATION BLOCKED", that means the enforcement is working!
+
+================================================================================
+WHAT WAS FIXED
+================================================================================
+
+1. Celery task now checks last signal before saving new signal
+2. If new signal has same label as last signal (BUY→BUY or SELL→SELL), it's SKIPPED
+3. Cleanup script removes old violations from database
+4. Result: Perfect alternation for all cryptos and timeframes
+
+================================================================================

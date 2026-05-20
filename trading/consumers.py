@@ -386,8 +386,10 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             
             logger.debug("Kline processed for %s (%s): close=%.2f", self.asset, self.timeframe, close_price)
             # Live signal detection on every closed candle
-            if is_closed:
-                asyncio.ensure_future(self._emit_live_signal())
+            # DISABLED: WebSocket signal detection causes duplicate and false signals
+            # Celery task (every 5 minutes) is the ONLY source of truth
+            # if is_closed:
+            #     asyncio.ensure_future(self._emit_live_signal())
 
             
         except Exception as exc:
@@ -615,44 +617,25 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             new_signal  = "BUY" if last_zone["is_bullish"] else "SELL"
             
             # ═══════════════════════════════════════════════════════════════════
-            # CRITICAL FIX: Let DATABASE handle ALL constraints (alternation, timing)
+            # SIGNAL DETECTION: Use reversal calculator to detect signals
             # 
-            # OLD PROBLEM: WebSocket had multiple blocking checks:
-            #   1. Alternation check (BUY/SELL must alternate)
-            #   2. 1-hour minimum gap check
-            #   3. Fingerprint check (duplicate prevention)
-            #
-            # If ANY check failed, signal was NOT saved to DB → NO email sent
-            # Then 30-min Celery task found it later → email sent 30 min late
-            #
-            # NEW SOLUTION: Only check fingerprint (prevent duplicate broadcasts),
-            # then ALWAYS save to DB. Database trigger handles alternation.
-            # This ensures INSTANT email delivery via Django signal handler.
-            # 
-            # FINGERPRINT FIX: Use TIMESTAMP instead of bar_index
-            # bar_index changes every time calculator runs (new candles added)
-            # timestamp is STABLE and identifies the exact signal candle
+            # The calculator returns zones with timestamps. We need to:
+            # 1. Check if signal already exists in database (avoid duplicates)
+            # 2. Enforce alternation (BUY→SELL→BUY→SELL)
+            # 3. Save to database (triggers email via Django signal handler)
             # ═══════════════════════════════════════════════════════════════════
             
-            # Get current candle timestamp for fingerprint
-            current_candle_timestamp = df.index[-1]
-            timestamp_int = int(current_candle_timestamp.timestamp())
+            # Check last signal from database to enforce alternation
+            last_db_signal = await self._get_last_db_signal(self.binance_symbol.upper(), self.timeframe)
             
-            # Use timestamp-based fingerprint (stable across recalculations)
-            fingerprint = f"{new_signal}:{timestamp_int}"
-            cache_key   = f"signal:last:{self.asset}:{self.timeframe}"
-            last_known  = await self.redis_client.get(cache_key)
-
-            if last_known == fingerprint:
-                logger.debug(
-                    "⏸️ WebSocket duplicate BLOCKED [%s %s]: %s @ %.2f (ts=%d) - already broadcast",
-                    self.asset, self.timeframe, new_signal,
-                    last_zone["center_price"], timestamp_int
-                )
-                return  # Already broadcast this exact signal
-
-            # Store fingerprint (expires in 24 hours)
-            await self.redis_client.set(cache_key, fingerprint, ex=86400)
+            # Enforce alternation: after BUY only SELL, after SELL only BUY
+            if last_db_signal:
+                if last_db_signal == new_signal:
+                    logger.debug(
+                        "⏸️ Alternation BLOCKED [%s %s]: %s after %s - must alternate",
+                        self.asset, self.timeframe, new_signal, last_db_signal
+                    )
+                    return  # Skip this signal, must alternate
 
             # ══════════════════════════════════════════════════════════════════
             # FIX: Use actual current close price as ENTRY — not the pivot price.
@@ -733,24 +716,13 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             tgt_px = round(tgt_px, 2)
             entry_px = actual_close  # ← the price users actually see on the chart
 
-            # ═══════════════════════════════════════════════════════════════════
-            # CRITICAL FIX: Use CURRENT candle timestamp, NOT pivot timestamp
-            # 
-            # PROBLEM: last_zone["timestamp"] is the PIVOT timestamp (when pivot formed)
-            # This could be 30-40 minutes old, causing emails to show old timestamps
-            # 
-            # SOLUTION: Use the CURRENT (most recent) candle's timestamp
-            # This is the CONFIRMATION time when the signal is actually detected
-            # ═══════════════════════════════════════════════════════════════════
-            # current_candle_timestamp already defined above for fingerprint
-            
+            # Use the timestamp from the zone (this is when the signal was detected)
             # Build a patched zone dict that stores the execution price
             last_zone_to_save = {
                 **last_zone,
                 "center_price": entry_px,   # execution price, matches chart
                 "stop_loss":    sl_px,
                 "target":       tgt_px,
-                "timestamp":    current_candle_timestamp,  # ← CURRENT time, not pivot time
                 # outer_top / outer_bottom aligned so history page fallback also matches
                 "outer_top":    tgt_px if is_bull else sl_px,
                 "outer_bottom": sl_px  if is_bull else tgt_px,
@@ -765,8 +737,7 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             # This ensures users receive alerts at the EXACT moment the signal fires,
             # regardless of WebSocket connection status.
 
-            # Use CURRENT candle timestamp for broadcast (not pivot timestamp)
-            ts = current_candle_timestamp
+            ts = last_zone["timestamp"]
             ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
 
             # Broadcast ONLY the single new signal, not all zones from window

@@ -126,7 +126,7 @@ CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', f'redis://{REDIS_HOST
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = 'Asia/Kolkata'
+CELERY_TIMEZONE = 'UTC'  # Use UTC for Celery (user timezones handled in frontend/email)
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_RESULT_EXTENDED = True
@@ -156,9 +156,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'Asia/Kolkata'
+TIME_ZONE = 'UTC'  # Server uses UTC, user timezones handled in frontend/email
 USE_I18N = True
-USE_TZ = True
+USE_TZ = True  # CRITICAL: Always use timezone-aware datetimes
 
 # Static files
 STATIC_URL = 'static/'
@@ -344,14 +344,16 @@ if not DEBUG:
 from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = getattr(globals().get('CELERY_BEAT_SCHEDULE') or {}, 'copy', lambda: {})()
 CELERY_BEAT_SCHEDULE.update({
+    # Daily full history calculation (00:30 UTC)
     'calculate-all-reversal-history-daily': {
         'task':     'reversal_zones.tasks.calculate_all_history',
         'schedule': crontab(hour=0, minute=30),
     },
-    # DISABLED: This task was creating FALSE signals that don't match live chart
-    # WebSocket live signals are the ONLY source of truth now
-    # 'update-all-recent-signals-every-30min': {
-    #     'task':     'reversal_zones.tasks.update_all_recent_signals',
-    #     'schedule': crontab(minute='*/30'),
-    # },
+    # ENABLED: 5-minute signal update for instant email delivery
+    # This is the ONLY source of truth for signal detection
+    # Runs every 5 minutes to detect new signals and send emails
+    'update-all-recent-signals-every-5min': {
+        'task':     'reversal_zones.tasks.update_all_recent_signals',
+        'schedule': crontab(minute='*/5'),  # Every 5 minutes
+    },
 })

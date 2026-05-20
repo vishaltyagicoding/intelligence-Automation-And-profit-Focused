@@ -123,7 +123,7 @@ jobs:
               --agree-tos \
               --no-eff-email \
               --non-interactive \
-              # --test-cert
+              --test-cert
 
             if [ $? -eq 0 ]; then
               echo "✅ Staging SSL certificate obtained!"
@@ -209,19 +209,35 @@ jobs:
           os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'neuraltrade.settings')
           django.setup()
           from django_celery_beat.models import PeriodicTask, IntervalSchedule, CrontabSchedule
+          
+          # Subscription check task (every 1 minute)
           interval, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.MINUTES)
-          PeriodicTask.objects.update_or_create(name='check-expired-subscriptions', defaults={'task': 'users.tasks.check_and_expire_subscriptions', 'interval': interval, 'enabled': True})
-          # DISABLED: This task was creating FALSE signals that don't match live chart
-          # WebSocket live signals are the ONLY source of truth now
-          # cron, _ = CrontabSchedule.objects.get_or_create(minute='*/15', hour='*', day_of_week='*', day_of_month='*', month_of_year='*', timezone='Asia/Kolkata')
-          # PeriodicTask.objects.update_or_create(name='update-all-recent-signals-every-15min', defaults={'task': 'reversal_zones.tasks.update_all_recent_signals', 'crontab': cron, 'enabled': True})
-          # Disable the task if it exists
-          try:
-              task = PeriodicTask.objects.get(name='update-all-recent-signals-every-15min')
-              task.enabled = False
-              task.save()
-          except PeriodicTask.DoesNotExist:
-              pass
+          PeriodicTask.objects.update_or_create(
+              name='check-expired-subscriptions',
+              defaults={'task': 'users.tasks.check_and_expire_subscriptions', 'interval': interval, 'enabled': True}
+          )
+          
+          # Signal update task (every 5 minutes) - THE ONLY SOURCE OF TRUTH
+          # Use UTC timezone (server timezone) - user timezones handled in frontend/email
+          cron_5min, _ = CrontabSchedule.objects.get_or_create(
+              minute='*/5', hour='*', day_of_week='*', day_of_month='*', month_of_year='*', timezone='UTC'
+          )
+          PeriodicTask.objects.update_or_create(
+              name='update-all-recent-signals-every-5min',
+              defaults={'task': 'reversal_zones.tasks.update_all_recent_signals', 'crontab': cron_5min, 'enabled': True}
+          )
+          
+          # Disable old 15-minute and 30-minute tasks if they exist
+          for old_task_name in ['update-all-recent-signals-every-15min', 'update-all-recent-signals-every-30min']:
+              try:
+                  task = PeriodicTask.objects.get(name=old_task_name)
+                  task.enabled = False
+                  task.save()
+                  print(f'Disabled old task: {old_task_name}')
+              except PeriodicTask.DoesNotExist:
+                  pass
+          
+          print('✅ Celery Beat tasks configured: 5-minute signal updates enabled (UTC timezone)')
           PYEOF
           EOF
 

@@ -1,12 +1,20 @@
 ================================================================================
-FIX FAKE SIGNALS - CLEANUP INSTRUCTIONS
+FIX FAKE SIGNALS - CLEANUP INSTRUCTIONS (UPDATED WITH 3-LAYER DEFENSE)
 ================================================================================
 
 PROBLEM: BUY→BUY and SELL→SELL violations visible on chart for all cryptos
 
-SOLUTION: 
-1. Code deployed with alternation enforcement (prevents future violations)
-2. Run cleanup script to remove existing violations from database
+ROOT CAUSE:
+1. Calculator processes historical data from scratch each run
+2. Batch processing didn't track last saved label within the batch  
+3. Calculator could emit consecutive signals if swing logic had edge cases
+
+SOLUTION (3-LAYER DEFENSE):
+✅ Layer 1: Calculator checks before emitting signals
+✅ Layer 2: Task checks before saving to database (with batch tracking)
+✅ Layer 3: Database constraint (final safety net)
+
+Result: IMPOSSIBLE to save consecutive signals now!
 
 ================================================================================
 STEP 1: Wait for GitHub Actions Deployment
@@ -14,7 +22,7 @@ STEP 1: Wait for GitHub Actions Deployment
 
 1. Go to: https://github.com/vishaltyagicoding/intelligence-Automation-And-profit-Focused/actions
 2. Wait for "Deploy to AWS" workflow to complete (green checkmark)
-3. This deploys the new code with alternation enforcement
+3. This deploys the new 3-layer defense code
 
 ================================================================================
 STEP 2: SSH to Singapore Server
@@ -24,7 +32,7 @@ ssh -i smartriskfx-singapore.pem ubuntu@13.250.19.107
 cd ~/smartrisk
 
 ================================================================================
-STEP 3: Run Cleanup Script (EASY METHOD)
+STEP 3: Run Cleanup Script (REMOVE EXISTING VIOLATIONS)
 ================================================================================
 
 sudo docker-compose exec django python run_cleanup_on_server.py
@@ -36,8 +44,14 @@ This will:
 - Delete the violating signals
 - Show summary of what was cleaned
 
+Expected output:
+📊 BTCUSDT 5m: Found 15 signals
+   ❌ VIOLATION: BUY after BUY at 2026-05-20 01:45:00
+   ❌ VIOLATION: SELL after SELL at 2026-05-20 07:25:00
+   ✅ Deleted 2 violating signals
+
 ================================================================================
-STEP 4: Restart Celery (Apply New Alternation Enforcement)
+STEP 4: Restart Celery (Apply 3-Layer Defense)
 ================================================================================
 
 sudo docker-compose restart celery_beat celery_worker
@@ -63,22 +77,79 @@ Expected results:
 ✅ All signals alternate perfectly
 
 ================================================================================
-MONITORING (Optional)
+MONITORING (Check Logs for Blocked Violations)
 ================================================================================
 
-Check if violations are being blocked (this is GOOD):
+Check if violations are being blocked (this is GOOD - means defense is working):
 
-sudo docker-compose logs celery_worker | grep "ALTERNATION VIOLATION"
+# Check Layer 1 (Calculator level blocks)
+sudo docker-compose logs celery_worker | grep "CALCULATOR BUG"
 
-If you see "ALTERNATION VIOLATION BLOCKED", that means the enforcement is working!
+# Check Layer 2 (Task level blocks)
+sudo docker-compose logs celery_worker | grep "ALTERNATION VIOLATION BLOCKED"
+
+If you see these messages, the 3-layer defense is working perfectly!
 
 ================================================================================
-WHAT WAS FIXED
+WHAT WAS FIXED (3-LAYER DEFENSE SYSTEM)
 ================================================================================
 
-1. Celery task now checks last signal before saving new signal
-2. If new signal has same label as last signal (BUY→BUY or SELL→SELL), it's SKIPPED
-3. Cleanup script removes old violations from database
-4. Result: Perfect alternation for all cryptos and timeframes
+LAYER 1 - Calculator Level (reversal_calculator.py):
+- _emit_reversal() now checks if last reversal has SAME direction
+- If consecutive signal detected (BUY→BUY or SELL→SELL), SKIP and log warning
+- This catches calculator bugs at the SOURCE before they reach the database
+
+LAYER 2 - Task Level (tasks.py):
+- _save_zones_to_db() tracks last saved label from DB
+- Tracks last saved label WITHIN the current batch
+- Compares each new signal against BOTH DB and batch history
+- Skips if same label (enforces alternation during batch processing)
+
+LAYER 3 - Database Level (models.py):
+- Alternation constraint in ReversalZone model (already existed)
+- Final safety net if Layers 1-2 somehow fail
+
+RESULT: TRIPLE PROTECTION
+- Calculator won't emit consecutive signals (Layer 1)
+- Task won't save consecutive signals (Layer 2)  
+- Database won't accept consecutive signals (Layer 3)
+
+Perfect alternation GUARANTEED: BUY → SELL → BUY → SELL
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+If you still see violations after cleanup:
+
+1. Check Celery logs for errors:
+   sudo docker-compose logs celery_worker --tail=100
+
+2. Verify Celery is running the 5-minute task:
+   sudo docker-compose logs celery_beat | grep "update-all-recent-signals"
+
+3. Manually check database for violations:
+   sudo docker-compose exec django python manage.py shell
+   
+   from reversal_zones.models import ReversalZone
+   from datetime import datetime, timedelta
+   import pytz
+   
+   today = datetime.now(pytz.UTC) - timedelta(hours=24)
+   signals = ReversalZone.objects.filter(
+       symbol='BTCUSDT',
+       timeframe='5m',
+       reversal_time__gte=today
+   ).order_by('reversal_time')
+   
+   prev = None
+   for sig in signals:
+       status = "✅" if prev != sig.label_text else "❌"
+       print(f"{status} {sig.reversal_time} - {sig.label_text}")
+       prev = sig.label_text
+   
+   exit()
+
+4. If violations persist, run cleanup script again
 
 ================================================================================

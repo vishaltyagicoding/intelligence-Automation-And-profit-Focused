@@ -420,6 +420,11 @@ class ReversalZoneCalculator:
                 
                 if (self._run_high - lo) >= threshold:
                     # confirmed HIGH pivot → bearish reversal signal
+                    logger.debug(
+                        "Swing tracking: swingDir=1 (upswing), emitting BEARISH reversal at bar %d (price %.2f)",
+                        self._run_high_bar,
+                        self._run_high_raw
+                    )
                     self._emit_reversal(
                         bar_index     = self._run_high_bar,
                         center_price  = self._run_high_raw,
@@ -444,6 +449,11 @@ class ReversalZoneCalculator:
                 
                 if (hi - self._run_low) >= threshold:
                     # confirmed LOW pivot → bullish reversal signal
+                    logger.debug(
+                        "Swing tracking: swingDir=-1 (downswing), emitting BULLISH reversal at bar %d (price %.2f)",
+                        self._run_low_bar,
+                        self._run_low_raw
+                    )
                     self._emit_reversal(
                         bar_index     = self._run_low_bar,
                         center_price  = self._run_low_raw,

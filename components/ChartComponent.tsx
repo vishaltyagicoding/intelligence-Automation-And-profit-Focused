@@ -167,12 +167,14 @@ export default function ChartComponent({
         scaleMargins: { top: 0.08, bottom: 0.08 },
       },
       localization: {
-        timeFormatter: (sec: number) =>
-          new Intl.DateTimeFormat(undefined, {
+        timeFormatter: (sec: number) => {
+          // Format time in user's local timezone for BOTH timeline and crosshair
+          return new Intl.DateTimeFormat(undefined, {
             year: '2-digit', month: '2-digit', day: '2-digit',
             hour: '2-digit', minute: '2-digit', hour12: false,
             timeZone: userTZ,
-          }).format(new Date(sec * 1000)).replace(',', ''),
+          }).format(new Date(sec * 1000)).replace(',', '');
+        },
       },
       timeScale: {
         borderColor: 'rgba(148,163,184,0.2)',

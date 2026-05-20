@@ -82,7 +82,7 @@ else:
         for v in violations:
             try:
                 cursor.execute(
-                    "DELETE FROM reversal_zones_reversalzone WHERE id = %s",
+                    "DELETE FROM reversal_zones WHERE id = %s",
                     [v['id']]
                 )
                 print(f"   ✅ Deleted ID {v['id']}: {v['label_text']} at {v['reversal_time'].strftime('%Y-%m-%d %H:%M:%S')}")

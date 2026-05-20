@@ -67,7 +67,7 @@ for symbol in SYMBOLS:
                 for vid in violations_to_delete:
                     try:
                         cursor.execute(
-                            "DELETE FROM reversal_zones_reversalzone WHERE id = %s",
+                            "DELETE FROM reversal_zones WHERE id = %s",
                             [vid]
                         )
                         print(f"   ✅ Deleted ID: {vid}")

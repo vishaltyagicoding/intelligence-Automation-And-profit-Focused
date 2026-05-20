@@ -1,3 +1,5 @@
+# final code for test delpoy-aws.yml file without 5 attempt you can push many time
+ 
 name: Deploy SmartRisk to AWS EC2
 
 on:
@@ -98,41 +100,40 @@ jobs:
             sudo docker-compose build django celery_worker celery_beat frontend
           EOF
 
-      - name: 🔐 Obtain or renew PRODUCTION SSL certificate
+      - name: 🔐 Obtain SSL certificate (staging – no rate limits)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Check if a valid production certificate already exists
-            if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "smartriskfx.com"; then
-              echo "✅ Valid certificate found. Checking renewal..."
-              sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true'
+            # Remove any old/corrupted certificate data
+            sudo rm -rf ./nginx/ssl/live/smartriskfx.com
+            sudo rm -rf ./nginx/ssl/archive/smartriskfx.com
+
+            echo "🔐 Obtaining TEST certificate from Let's Encrypt staging..."
+            sudo fuser -k 80/tcp || true
+
+            # CORRECT DOMAIN NAME (no typo)
+            sudo docker run --rm \
+              -v $(pwd)/nginx/ssl:/etc/letsencrypt \
+              -p 80:80 \
+              certbot/certbot certonly --standalone \
+              -d smartriskfx.com \
+              -d www.smartriskfx.com \
+              --email ${{ secrets.CERTBOT_EMAIL }} \
+              --agree-tos \
+              --no-eff-email \
+              --non-interactive \
+              # --test-cert
+
+            if [ $? -eq 0 ]; then
+              echo "✅ Staging SSL certificate obtained!"
+              sudo chmod -R 755 ./nginx/ssl
             else
-              echo "🔐 Obtaining new PRODUCTION certificate from Let's Encrypt..."
-              sudo rm -rf ./nginx/ssl/live/smartriskfx.com
-              sudo rm -rf ./nginx/ssl/archive/smartriskfx.com
-              sudo fuser -k 80/tcp || true
-
-              sudo docker run --rm \
-                -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-                -p 80:80 \
-                certbot/certbot certonly --standalone \
-                -d smartriskfx.com \
-                -d www.smartriskfx.com \
-                --email ${{ secrets.CERTBOT_EMAIL }} \
-                --agree-tos \
-                --no-eff-email \
-                --non-interactive
-
-              if [ $? -eq 0 ]; then
-                echo "✅ Production SSL certificate obtained!"
-                sudo chmod -R 755 ./nginx/ssl
-              else
-                echo "❌ SSL certificate failed. Check DNS resolution for smartriskfx.com and port 80."
-                echo "=== DNS lookup for smartriskfx.com ==="
-                dig smartriskfx.com +short || nslookup smartriskfx.com
-                exit 1
-              fi
+              echo "❌ SSL certificate failed. Check DNS resolution for smartriskfx.com and port 80."
+              # Diagnostic: show DNS resolution
+              echo "=== DNS lookup for smartriskfx.com ==="
+              dig smartriskfx.com +short || nslookup smartriskfx.com
+              exit 1
             fi
           EOF
 
@@ -210,6 +211,11 @@ jobs:
           from django_celery_beat.models import PeriodicTask, IntervalSchedule, CrontabSchedule
           interval, _ = IntervalSchedule.objects.get_or_create(every=1, period=IntervalSchedule.MINUTES)
           PeriodicTask.objects.update_or_create(name='check-expired-subscriptions', defaults={'task': 'users.tasks.check_and_expire_subscriptions', 'interval': interval, 'enabled': True})
+          # DISABLED: This task was creating FALSE signals that don't match live chart
+          # WebSocket live signals are the ONLY source of truth now
+          # cron, _ = CrontabSchedule.objects.get_or_create(minute='*/15', hour='*', day_of_week='*', day_of_month='*', month_of_year='*', timezone='Asia/Kolkata')
+          # PeriodicTask.objects.update_or_create(name='update-all-recent-signals-every-15min', defaults={'task': 'reversal_zones.tasks.update_all_recent_signals', 'crontab': cron, 'enabled': True})
+          # Disable the task if it exists
           try:
               task = PeriodicTask.objects.get(name='update-all-recent-signals-every-15min')
               task.enabled = False
@@ -226,11 +232,11 @@ jobs:
             sudo docker-compose restart celery_beat celery_worker
           EOF
 
-      - name: 🔐 Setup SSL auto‑renewal (production)
+      - name: 🔐 Setup SSL auto-renewal (staging)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true' --post-hook 'cd ~/smartrisk && sudo docker-compose exec -T nginx nginx -s reload' --quiet") | crontab -
-            echo "✅ SSL auto‑renewal installed (production)"
+            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true' --post-hook 'cd ~/smartrisk && sudo docker-compose exec -T nginx nginx -s reload' --quiet --test-cert") | crontab -
+            echo "✅ SSL auto-renewal installed (staging environment)"
           EOF
 
       - name: 📊 Deployment Summary
@@ -239,7 +245,8 @@ jobs:
           echo "✅ DEPLOYMENT SUCCESSFUL!"
           echo "=========================================================================="
           echo "🌐 https://smartriskfx.com"
-          echo "🔒 SSL is active with a PRODUCTION certificate (trusted padlock)."
+          echo "🔒 SSL is active (staging certificate – browser will show 'Not Secure')"
+          echo "⚠️ To get a production certificate, set '--test-cert' and '--staging' flags to false after rate limit expires."
           echo "=========================================================================="
 
   notify-failure:

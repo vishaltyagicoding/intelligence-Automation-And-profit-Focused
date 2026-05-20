@@ -628,18 +628,26 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             # NEW SOLUTION: Only check fingerprint (prevent duplicate broadcasts),
             # then ALWAYS save to DB. Database trigger handles alternation.
             # This ensures INSTANT email delivery via Django signal handler.
+            # 
+            # FINGERPRINT FIX: Use TIMESTAMP instead of bar_index
+            # bar_index changes every time calculator runs (new candles added)
+            # timestamp is STABLE and identifies the exact signal candle
             # ═══════════════════════════════════════════════════════════════════
             
-            # Only check fingerprint to avoid re-broadcasting the exact same signal
-            fingerprint = f"{new_signal}:{last_zone['bar_index']}"
+            # Get current candle timestamp for fingerprint
+            current_candle_timestamp = df.index[-1]
+            timestamp_int = int(current_candle_timestamp.timestamp())
+            
+            # Use timestamp-based fingerprint (stable across recalculations)
+            fingerprint = f"{new_signal}:{timestamp_int}"
             cache_key   = f"signal:last:{self.asset}:{self.timeframe}"
             last_known  = await self.redis_client.get(cache_key)
 
             if last_known == fingerprint:
                 logger.debug(
-                    "⏸️ WebSocket duplicate BLOCKED [%s %s]: %s @ %.2f (bar=%d) - already broadcast",
+                    "⏸️ WebSocket duplicate BLOCKED [%s %s]: %s @ %.2f (ts=%d) - already broadcast",
                     self.asset, self.timeframe, new_signal,
-                    last_zone["center_price"], last_zone['bar_index']
+                    last_zone["center_price"], timestamp_int
                 )
                 return  # Already broadcast this exact signal
 
@@ -734,7 +742,7 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             # SOLUTION: Use the CURRENT (most recent) candle's timestamp
             # This is the CONFIRMATION time when the signal is actually detected
             # ═══════════════════════════════════════════════════════════════════
-            current_candle_timestamp = df.index[-1]  # Most recent candle timestamp
+            # current_candle_timestamp already defined above for fingerprint
             
             # Build a patched zone dict that stores the execution price
             last_zone_to_save = {

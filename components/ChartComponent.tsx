@@ -27,7 +27,7 @@ const ASSET_TO_BINANCE: Record<WatchlistAsset, string> = {
   XAUUSD: 'PAXGUSDT', LTCUSD: 'LTCUSDT',
 };
 
-// Lowercase stream names for Binance WebSocket
+// Lowercase stream names for Binance WebSocket 
 const ASSET_TO_BINANCE_WS: Record<WatchlistAsset, string> = {
   BTCUSD: 'btcusdt', ETHUSD: 'ethusdt',
   XAUUSD: 'paxgusdt', LTCUSD: 'ltcusdt',

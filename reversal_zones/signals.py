@@ -91,20 +91,32 @@ def send_instant_email_on_new_signal(sender, instance, created, **kwargs):
             'timestamp_dt':  utc_dt,          # raw datetime — for per-user tz conversion
         }
 
-        # Send email notifications to paid subscribers
-        notifications_sent = notify_signal_subscribers(signal_data)
+        # Send email notifications to paid subscribers — in a background thread
+        # so the post_save handler returns immediately and never blocks the DB writer.
+        from threading import Thread
 
-        if notifications_sent > 0:
-            logger.info(
-                "📧 INSTANT EMAIL: %d sent for %s %s %s @ %.2f (SL=%.2f, TP=%.2f)",
-                notifications_sent, user_symbol, instance.timeframe,
-                signal_data['signal_type'], entry, stop_loss, target
-            )
-        else:
-            logger.debug(
-                "No subscribers for %s %s %s",
-                user_symbol, instance.timeframe, signal_data['signal_type']
-            )
+        def _send_emails():
+            try:
+                notifications_sent = notify_signal_subscribers(signal_data)
+                if notifications_sent > 0:
+                    logger.info(
+                        "📧 INSTANT EMAIL: %d sent for %s %s %s @ %.2f (SL=%.2f, TP=%.2f)",
+                        notifications_sent, user_symbol, instance.timeframe,
+                        signal_data['signal_type'], entry, stop_loss, target
+                    )
+                else:
+                    logger.debug(
+                        "No subscribers for %s %s %s",
+                        user_symbol, instance.timeframe, signal_data['signal_type']
+                    )
+            except Exception as exc:
+                logger.error(
+                    "Error sending instant email for signal %s %s: %s",
+                    instance.symbol, instance.timeframe, exc,
+                    exc_info=True
+                )
+
+        Thread(target=_send_emails, daemon=True).start()
     
     except Exception as e:
         logger.error(

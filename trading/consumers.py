@@ -385,11 +385,11 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             )
             
             logger.debug("Kline processed for %s (%s): close=%.2f", self.asset, self.timeframe, close_price)
-            # Live signal detection on every closed candle
-            # DISABLED: WebSocket signal detection causes duplicate and false signals
-            # Celery task (every 5 minutes) is the ONLY source of truth
-            # if is_closed:
-            #     asyncio.ensure_future(self._emit_live_signal())
+            # Live signal detection on every CLOSED candle — fires INSTANTLY
+            # Deduplication is handled in _emit_live_signal via Redis lock + update_or_create.
+            # Celery 5-min task is the reliable FALLBACK in case WebSocket is down.
+            if is_closed:
+                asyncio.ensure_future(self._emit_live_signal())
 
             
         except Exception as exc:
@@ -728,9 +728,26 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                 "outer_bottom": sl_px  if is_bull else tgt_px,
             }
 
+            # ── Redis dedup lock: prevent duplicate email on WebSocket reconnect ──────
+            # Use the signal's reversal_time (candle close time) as the unique key.
+            # TTL = 10 minutes: if the same signal fires again within 10 min, skip.
+            ts_for_lock = last_zone.get("timestamp")
+            ts_lock_str = ts_for_lock.isoformat() if hasattr(ts_for_lock, "isoformat") else str(ts_for_lock)
+            signal_lock_key = f"signal:fired:{self.binance_symbol.upper()}:{self.timeframe}:{ts_lock_str}"
+            already_fired = await self.redis_client.get(signal_lock_key)
+            if already_fired:
+                logger.debug(
+                    "⏭️ Dedup lock: skipping already-fired signal [%s %s] @ %s",
+                    self.asset, self.timeframe, ts_lock_str
+                )
+                return
+
             # Save ONLY the last zone (the new signal) to DB
             db_symbol = self.binance_symbol.upper()
             await self._save_signal_to_db(db_symbol, self.timeframe, last_zone_to_save)
+
+            # Set dedup lock AFTER saving — 10 min TTL
+            await self.redis_client.set(signal_lock_key, "1", ex=600)
 
             # ── Email notifications are now sent automatically via Django signals ─
             # See reversal_zones/signals.py - sends INSTANT emails when signal is saved to DB
@@ -1220,14 +1237,24 @@ def create_and_serialize_signal(
         else:
             ts_str = str(signal_candle_time)
         
+        # Normalise signal_candle_time to a proper UTC datetime for per-user tz conversion
+        import pytz as _pytz
+        if hasattr(signal_candle_time, 'tzinfo') and signal_candle_time.tzinfo is None:
+            signal_candle_time_utc = _pytz.utc.localize(signal_candle_time)
+        elif hasattr(signal_candle_time, 'astimezone'):
+            signal_candle_time_utc = signal_candle_time.astimezone(_pytz.utc)
+        else:
+            signal_candle_time_utc = None
+
         signal_data = {
-            'crypto':       asset,   # Already in user format: BTCUSD, ETHUSD, XAUUSD, LTCUSD
-            'timeframe':    (ai_context.get('timeframe') if ai_context else None) or self.timeframe,
-            'signal_type':  action,
-            'entry_price':  float(price) if price else 0,
-            'stop_loss':    float(stop_loss) if stop_loss else 0,
-            'target':       float(target) if target else 0,
-            'timestamp':    ts_str,
+            'crypto':        asset,   # Already in user format: BTCUSD, ETHUSD, XAUUSD, LTCUSD
+            'timeframe':     (ai_context.get('timeframe') if ai_context else None) or self.timeframe,
+            'signal_type':   action,
+            'entry_price':   float(price) if price else 0,
+            'stop_loss':     float(stop_loss) if stop_loss else 0,
+            'target':        float(target) if target else 0,
+            'timestamp':     ts_str,         # UTC fallback string
+            'timestamp_dt':  signal_candle_time_utc,  # raw datetime for per-user tz conversion
         }
         
         # Send notifications asynchronously (non-blocking)

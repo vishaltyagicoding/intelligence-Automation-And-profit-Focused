@@ -424,16 +424,16 @@ def calculate_all_history():
 def update_all_recent_signals():
     """
     Incremental signal update for all symbols × timeframes.
-    Runs every 30 minutes — this is what makes Pine Script logic
-    work continuously throughout the day.
+    Runs every 5 minutes — this is the reliable FALLBACK that catches signals
+    missed while WebSocket was down (primary path: _emit_live_signal in consumers.py).
     """
-    logger.info("🔄 30-min incremental signal update starting...")
+    logger.info("🔄 5-min incremental signal update starting...")
     count = 0
     for symbol in SYMBOLS:
         for tf in ALL_TIMEFRAMES:
+            # No countdown delay — dispatch immediately for fastest execution
             update_recent_signals_for_symbol_timeframe.apply_async(
                 args=[symbol, tf],
-                countdown=count * 1,
             )
             count += 1
     logger.info("📋 Queued %d incremental tasks", count)

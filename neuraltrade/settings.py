@@ -134,7 +134,9 @@ CELERY_RESULT_BACKEND_ALWAYS_RETRY = True
 CELERY_RESULT_BACKEND_MAX_RETRIES = 10
 
 # Celery Beat Schedule
-CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+# Use PersistentScheduler (file-based) so CELERY_BEAT_SCHEDULE in settings always
+# takes precedence — avoids stale DB schedules causing long delays.
+CELERY_BEAT_SCHEDULER = 'celery.beat:PersistentScheduler'
 
 # Cache Configuration - Using dummy cache to avoid Redis connection issues
 CACHES = {

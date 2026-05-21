@@ -344,18 +344,17 @@ if not DEBUG:
 
 # Celery Beat schedules
 from celery.schedules import crontab
-CELERY_BEAT_SCHEDULE = getattr(globals().get('CELERY_BEAT_SCHEDULE') or {}, 'copy', lambda: {})()
-CELERY_BEAT_SCHEDULE.update({
+from datetime import timedelta as _timedelta
+CELERY_BEAT_SCHEDULE = {
     # Daily full history calculation (00:30 UTC)
     'calculate-all-reversal-history-daily': {
         'task':     'reversal_zones.tasks.calculate_all_history',
         'schedule': crontab(hour=0, minute=30),
     },
-    # ENABLED: 5-minute signal update for instant email delivery
-    # This is the ONLY source of truth for signal detection
-    # Runs every 5 minutes to detect new signals and send emails
-    'update-all-recent-signals-every-5min': {
+    # REAL-TIME FALLBACK: runs every 60 seconds to catch any signals missed by WebSocket
+    # timedelta is more reliable than crontab for high-frequency tasks
+    'update-all-recent-signals-every-1min': {
         'task':     'reversal_zones.tasks.update_all_recent_signals',
-        'schedule': crontab(minute='*/5'),  # Every 5 minutes
+        'schedule': _timedelta(seconds=60),   # Every 60 seconds — max 1 min delay
     },
-})
+}

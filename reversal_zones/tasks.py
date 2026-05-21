@@ -32,6 +32,24 @@ import pandas as pd
 from django.utils import timezone as tz
 import pytz
 
+# ── Redis client for task heartbeat + distributed lock ────────────────────────
+def _get_task_redis():
+    """Dedicated Redis client (DB=4) for task scheduling metadata."""
+    import redis as _r
+    from django.conf import settings
+    return _r.Redis(
+        host=getattr(settings, 'REDIS_HOST', 'redis'),
+        port=getattr(settings, 'REDIS_PORT', 6379),
+        db=4,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+        decode_responses=True,
+    )
+
+HEARTBEAT_KEY  = 'beat:heartbeat:update_all_recent_signals'
+LOCK_KEY       = 'lock:update_all_recent_signals'
+HEARTBEAT_TTL  = 300   # 5 min — if key expires, beat is dead
+
 logger = logging.getLogger(__name__)
 
 # ── All symbols in BTCUSDT format (matches Binance API + DB) ─────────────────
@@ -267,13 +285,26 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
 
 
 def _filter_new_only(zones: list, last_db: dict | None) -> list:
-    """Return only zones that occur AFTER the last DB signal timestamp."""
-    if not last_db or not zones:
-        return zones
+    """
+    Return only zones that are BOTH:
+    1. Within the last 30 minutes (HARD freshness cutoff — prevents old signal spam
+       when DB is empty after a fresh deploy or DB wipe)
+    2. After the last DB signal timestamp (prevents duplicate saves)
 
-    last_time = last_db["reversal_time"]
-    if last_time.tzinfo is None:
-        last_time = pytz.utc.localize(last_time)
+    The 30-min window means: even if DB is empty, we NEVER email signals older
+    than 30 minutes. Users only ever receive alerts for truly new signals.
+    """
+    from datetime import datetime, timedelta as _td
+    now_utc = datetime.now(pytz.utc)
+    # Hard cutoff: signals older than 30 minutes are NEVER treated as "new"
+    freshness_cutoff = now_utc - _td(minutes=30)
+
+    # Normalise last_db timestamp once
+    last_time = None
+    if last_db and last_db.get("reversal_time"):
+        last_time = last_db["reversal_time"]
+        if last_time.tzinfo is None:
+            last_time = pytz.utc.localize(last_time)
 
     new = []
     for z in zones:
@@ -291,8 +322,15 @@ def _filter_new_only(zones: list, last_db: dict | None) -> list:
         if zt.tzinfo is None:
             zt = pytz.utc.localize(zt)
 
-        if zt > last_time:
-            new.append(z)
+        # RULE 1 — Freshness: must be within last 30 minutes
+        if zt < freshness_cutoff:
+            continue
+
+        # RULE 2 — Dedup: must be after the last saved DB signal
+        if last_time is not None and zt <= last_time:
+            continue
+
+        new.append(z)
 
     return new
 
@@ -420,23 +458,66 @@ def calculate_all_history():
     return {"queued": count}
 
 
-@shared_task
-def update_all_recent_signals():
+@shared_task(bind=True, max_retries=0)
+def update_all_recent_signals(self):
     """
-    Incremental signal update for all symbols × timeframes.
-    Runs every 5 minutes — this is the reliable FALLBACK that catches signals
-    missed while WebSocket was down (primary path: _emit_live_signal in consumers.py).
+    SELF-PERPETUATING signal update — never depends solely on celery-beat.
+
+    THREE-LAYER reliability:
+      Layer 1 — celery-beat triggers this every 60 seconds (settings.py)
+      Layer 2 — task reschedules ITSELF at the end (self-perpetuating chain)
+                 so it keeps running even if celery-beat crashes or is misconfigured
+      Layer 3 — Redis distributed lock prevents overlap if both layers fire at once
+
+    If celery-beat is broken: task still runs every 60 sec via self-scheduling.
+    If celery-worker is broken: celery-beat re-queues on worker recovery.
+    Both broken simultaneously: monitoring alert fires (see HEARTBEAT_KEY in Redis).
     """
-    logger.info("🔄 5-min incremental signal update starting...")
+    r = None
+    lock_acquired = False
+    try:
+        r = _get_task_redis()
+        # ── Distributed lock — prevent two instances running simultaneously ──
+        lock_acquired = r.set(LOCK_KEY, "1", nx=True, ex=90)
+        if not lock_acquired:
+            logger.debug("update_all_recent_signals: skipping (another instance running)")
+            return {"status": "skipped_locked"}
+
+        # ── Heartbeat: update timestamp so monitoring knows beat is alive ────
+        r.set(HEARTBEAT_KEY, str(int(time.time())), ex=HEARTBEAT_TTL)
+
+    except Exception as redis_err:
+        logger.warning("Redis unavailable in update_all_recent_signals: %s", redis_err)
+        # Continue anyway — signal detection is more important than Redis
+
+    logger.info("🔄 Signal update starting (self-perpetuating)...")
     count = 0
-    for symbol in SYMBOLS:
-        for tf in ALL_TIMEFRAMES:
-            # No countdown delay — dispatch immediately for fastest execution
-            update_recent_signals_for_symbol_timeframe.apply_async(
-                args=[symbol, tf],
-            )
-            count += 1
-    logger.info("📋 Queued %d incremental tasks", count)
+    try:
+        for symbol in SYMBOLS:
+            for tf in ALL_TIMEFRAMES:
+                update_recent_signals_for_symbol_timeframe.apply_async(
+                    args=[symbol, tf],
+                )
+                count += 1
+        logger.info("📋 Queued %d signal-check tasks", count)
+    finally:
+        # ── Release lock ─────────────────────────────────────────────────────
+        if lock_acquired and r:
+            try:
+                r.delete(LOCK_KEY)
+            except Exception:
+                pass
+
+        # ── LAYER 2: Self-reschedule in 60 seconds ────────────────────────────
+        # This runs regardless of celery-beat status.
+        # Even if someone accidentally changes back to DatabaseScheduler or
+        # deletes the PeriodicTask, signals will keep running every 60 seconds.
+        try:
+            update_all_recent_signals.apply_async(countdown=60)
+            logger.debug("♻️ Self-rescheduled in 60 seconds")
+        except Exception as sched_err:
+            logger.error("Self-reschedule failed (beat is now the only trigger): %s", sched_err)
+
     return {"queued": count}
 
 

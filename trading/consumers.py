@@ -607,7 +607,8 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             if len(df) < 10:
                 return
 
-            result = run_filtered_calculator(df, timeframe=self.timeframe)
+            # Pass symbol so alternation is seeded from DB (prevents consecutive BUY/SELL)
+            result = run_filtered_calculator(df, timeframe=self.timeframe, symbol=self.binance_symbol.upper())
             zones  = result.get("zones", [])
             status = result.get("status", {})
             if not zones:

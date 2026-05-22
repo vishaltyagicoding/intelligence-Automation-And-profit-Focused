@@ -80,6 +80,7 @@ urlpatterns = [
     path('health/', health_check, name='health-check'),              # Docker health check
     path('health/signals/', signal_health_check, name='signal-health'),  # Signal system monitor
     path('admin/', admin.site.urls),
+    path('', include('landing.urls')),  # Landing page at /join
     path('', include('api_docs.urls')),  # API Documentation Homepage
     path('api/trading/', include('trading.urls')),
     path('api/users/', include('users.urls')),

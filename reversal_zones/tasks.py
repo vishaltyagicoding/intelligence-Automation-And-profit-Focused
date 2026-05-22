@@ -32,6 +32,24 @@ import pandas as pd
 from django.utils import timezone as tz
 import pytz
 
+# ── Redis client for task heartbeat + distributed lock ────────────────────────
+def _get_task_redis():
+    """Dedicated Redis client (DB=4) for task scheduling metadata."""
+    import redis as _r
+    from django.conf import settings
+    return _r.Redis(
+        host=getattr(settings, 'REDIS_HOST', 'redis'),
+        port=getattr(settings, 'REDIS_PORT', 6379),
+        db=4,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+        decode_responses=True,
+    )
+
+HEARTBEAT_KEY  = 'beat:heartbeat:update_all_recent_signals'
+LOCK_KEY       = 'lock:update_all_recent_signals'
+HEARTBEAT_TTL  = 300   # 5 min — if key expires, beat is dead
+
 logger = logging.getLogger(__name__)
 
 # ── All symbols in BTCUSDT format (matches Binance API + DB) ─────────────────
@@ -52,11 +70,20 @@ DAYS_BACK = {
     "2h": 30,  "4h": 30,  "1d": 30,
 }
 
-# Recent window for 30-min incremental updates (hours)
+# Recent window for 60-second incremental updates (hours).
+# Must be large enough for calculator EMA warmup (~25 bars minimum)
+# but small enough to finish quickly.
+# 5M:  4h = 48 candles  (EMA-5 needs 25, we give 48 for safety)
+# 15M: 6h = 24 candles
+# 30M: 12h = 24 candles
+# 1H:  24h = 24 candles
+# 2H:  48h = 24 candles
+# 4H:  96h = 24 candles
+# 1D:  30d = 30 candles
 RECENT_HOURS = {
-    "5m": 24,
-    "15m": 48, "30m": 72, "1h": 96,
-    "2h": 120, "4h": 168, "1d": 720,
+    "5m":  4,
+    "15m": 6,  "30m": 12, "1h": 24,
+    "2h":  48, "4h":  96, "1d": 720,
 }
 
 
@@ -149,111 +176,104 @@ def _get_last_db_signal(symbol: str, timeframe: str) -> dict | None:
 
 def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
     """
-    Bulk-save filtered zones to DB with STRICT alternation enforcement.
-    Uses update_or_create on (symbol, timeframe, reversal_time).
+    Save new zones to DB with strict alternation enforcement and a
+    DB-level advisory lock to prevent race conditions between the
+    Celery task path and the WebSocket consumer path running simultaneously.
+
     Returns count of newly created records.
-    
-    ALTERNATION ENFORCEMENT (MULTI-LAYER):
-    1. Get the last saved signal from DB (before processing batch)
-    2. Track the last label saved WITHIN this batch
-    3. Before saving any signal, check BOTH DB and batch history
-    4. If new signal has same label (BUY→BUY or SELL→SELL), SKIP IT
-    5. This ensures PERFECT alternation: BUY → SELL → BUY → SELL
-    
-    NOTE: Email notifications are now sent automatically via Django signals
-    (reversal_zones/signals.py) when new signals are created. This ensures
-    INSTANT delivery at the exact moment the signal fires.
+    Emails are sent automatically via Django post_save signal.
     """
     from reversal_zones.models import ReversalZone
-    from django.db import IntegrityError
+    from django.db import IntegrityError, transaction
 
     saved = 0
     skipped_violations = 0
-    
-    # ── Get the LAST signal from DB (before processing this batch) ────────────
-    last_db_signal = (
-        ReversalZone.objects
-        .filter(symbol=symbol, timeframe=timeframe)
-        .order_by("-reversal_time")
-        .values("label_text", "reversal_time")
-        .first()
+
+    # Sort zones chronologically — always process oldest → newest
+    zones_sorted = sorted(
+        zones,
+        key=lambda z: z.get("timestamp") or z.get("reversal_time")
     )
-    
-    # Track the last label saved in THIS batch (for within-batch alternation check)
-    last_saved_label = last_db_signal["label_text"] if last_db_signal else None
-    
-    # Sort zones by timestamp to process in chronological order
-    zones_sorted = sorted(zones, key=lambda z: z.get("timestamp") or z.get("reversal_time"))
-    
-    for z in zones_sorted:
-        try:
-            ts = z.get("timestamp") or z.get("reversal_time")
-            if isinstance(ts, str):
-                from django.utils.dateparse import parse_datetime
-                reversal_time = parse_datetime(ts)
-            elif hasattr(ts, "to_pydatetime"):
-                reversal_time = ts.to_pydatetime()
-            else:
-                reversal_time = ts
 
-            if reversal_time is None:
-                continue
-            if reversal_time.tzinfo is None:
-                reversal_time = pytz.utc.localize(reversal_time)
+    # Wrap in atomic transaction with select_for_update to serialize
+    # concurrent saves from Celery task + WebSocket consumer
+    with transaction.atomic():
+        # Re-read last signal INSIDE the transaction with row lock
+        last_row = (
+            ReversalZone.objects
+            .filter(symbol=symbol, timeframe=timeframe)
+            .select_for_update()           # advisory lock — serializes saves
+            .order_by("-reversal_time")
+            .values("label_text", "reversal_time")
+            .first()
+        )
+        last_saved_label = last_row["label_text"] if last_row else None
 
-            is_bull = z.get("is_bullish", True)
-            new_label = "BUY" if is_bull else "SELL"
+        for z in zones_sorted:
+            try:
+                ts = z.get("timestamp") or z.get("reversal_time")
+                if isinstance(ts, str):
+                    from django.utils.dateparse import parse_datetime
+                    reversal_time = parse_datetime(ts)
+                elif hasattr(ts, "to_pydatetime"):
+                    reversal_time = ts.to_pydatetime()
+                else:
+                    reversal_time = ts
 
-            # ── ALTERNATION CHECK: Compare with last saved label ──────────────
-            # Check against BOTH: last DB signal AND last signal saved in this batch
-            if last_saved_label == new_label:
-                logger.warning(
-                    "🛡️ ALTERNATION VIOLATION BLOCKED: %s→%s at %s [%s %s]",
-                    last_saved_label,
-                    new_label,
-                    reversal_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    symbol,
-                    timeframe
+                if reversal_time is None:
+                    continue
+                if reversal_time.tzinfo is None:
+                    reversal_time = pytz.utc.localize(reversal_time)
+
+                is_bull   = z.get("is_bullish", True)
+                new_label = "BUY" if is_bull else "SELL"
+
+                # ── ALTERNATION CHECK ─────────────────────────────────────────
+                if last_saved_label == new_label:
+                    logger.warning(
+                        "🛡️ ALTERNATION BLOCKED: %s→%s at %s [%s %s]",
+                        last_saved_label, new_label,
+                        reversal_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        symbol, timeframe,
+                    )
+                    skipped_violations += 1
+                    continue
+
+                # ── Save signal ───────────────────────────────────────────────
+                zone_obj, created = ReversalZone.objects.update_or_create(
+                    symbol        = symbol,
+                    timeframe     = timeframe,
+                    reversal_time = reversal_time,
+                    defaults={
+                        "center_price": z["center_price"],
+                        "stop_loss":    z.get("stop_loss"),
+                        "target":       z.get("target"),
+                        "outer_top":    z["outer_top"],
+                        "outer_bottom": z["outer_bottom"],
+                        "core_top":     z["core_top"],
+                        "core_bottom":  z["core_bottom"],
+                        "is_bullish":   is_bull,
+                        "label_text":   new_label,
+                        "bar_index":    z.get("bar_index", 0),
+                    },
                 )
-                skipped_violations += 1
-                continue  # SKIP this signal
+                if created:
+                    saved += 1
+                    last_saved_label = new_label
+                    logger.info(
+                        "✅ Saved NEW %s signal [%s %s] @ %.4f  time=%s",
+                        new_label, symbol, timeframe,
+                        float(z["center_price"]),
+                        reversal_time.strftime("%Y-%m-%d %H:%M:%S UTC"),
+                    )
 
-            # ── Save signal (alternation is valid) ────────────────────────────
-            zone, created = ReversalZone.objects.update_or_create(
-                symbol        = symbol,
-                timeframe     = timeframe,
-                reversal_time = reversal_time,
-                defaults={
-                    "center_price": z["center_price"],
-                    "outer_top":    z["outer_top"],
-                    "outer_bottom": z["outer_bottom"],
-                    "core_top":     z["core_top"],
-                    "core_bottom":  z["core_bottom"],
-                    "is_bullish":   is_bull,
-                    "label_text":   new_label,
-                    "bar_index":    z.get("bar_index", 0),
-                },
-            )
-            if created:
-                saved += 1
-                # Update last_saved_label for next iteration (within-batch tracking)
-                last_saved_label = new_label
-                logger.info(
-                    "✅ Signal saved: %s at %s [%s %s]",
-                    new_label,
-                    reversal_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    symbol,
-                    timeframe
-                )
-                # Email is sent automatically by Django signal (reversal_zones/signals.py)
-
-        except (IntegrityError, Exception) as e:
-            msg = str(e)
-            if "Consecutive" in msg and "signals not allowed" in msg:
-                logger.info("🛡️ DB constraint blocked consecutive signal [%s %s]", symbol, timeframe)
-                skipped_violations += 1
-            else:
-                logger.error("Error saving zone [%s %s]: %s", symbol, timeframe, e)
+            except (IntegrityError, Exception) as e:
+                msg = str(e)
+                if "Consecutive" in msg and "signals not allowed" in msg:
+                    logger.info("🛡️ DB constraint blocked consecutive signal [%s %s]", symbol, timeframe)
+                    skipped_violations += 1
+                else:
+                    logger.error("Error saving zone [%s %s]: %s", symbol, timeframe, e)
 
     if skipped_violations > 0:
         logger.info(
@@ -268,18 +288,28 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
 
 def _filter_new_only(zones: list, last_db: dict | None) -> list:
     """
-    Return only zones that are BOTH:
-    1. Within the last 30 minutes (HARD freshness cutoff — prevents old signal spam
-       when DB is empty after a fresh deploy or DB wipe)
-    2. After the last DB signal timestamp (prevents duplicate saves)
+    Return only zones that are AFTER the last saved DB signal timestamp.
 
-    The 30-min window means: even if DB is empty, we NEVER email signals older
-    than 30 minutes. Users only ever receive alerts for truly new signals.
+    IMPORTANT: We do NOT apply a time-based freshness cutoff here because
+    `reversal_time` is the candle's CLOSE timestamp, not when it was detected.
+    A 4H candle that closed at 08:00 and gets detected at 09:30 has
+    reversal_time=08:00 — a 30-min cutoff would block it entirely.
+
+    The only cutoff that matters is:
+    - If DB has a previous signal: zone must be AFTER that signal's reversal_time
+    - If DB is empty (fresh deploy): only save zones from last 2 hours maximum
+      to prevent emailing days-old historical signals after a DB wipe.
+
+    The 10-min freshness in signals.py (using created_at) handles preventing
+    old DB rows from triggering emails.
     """
     from datetime import datetime, timedelta as _td
     now_utc = datetime.now(pytz.utc)
-    # Hard cutoff: signals older than 30 minutes are NEVER treated as "new"
-    freshness_cutoff = now_utc - _td(minutes=30)
+
+    # When DB is empty: only process signals from the last 2 hours
+    # This prevents emailing 2-3 day old signals after a fresh DB wipe/deploy.
+    # 2 hours is generous enough to catch any timeframe (even 1H/4H) correctly.
+    empty_db_cutoff = now_utc - _td(hours=2)
 
     # Normalise last_db timestamp once
     last_time = None
@@ -304,13 +334,14 @@ def _filter_new_only(zones: list, last_db: dict | None) -> list:
         if zt.tzinfo is None:
             zt = pytz.utc.localize(zt)
 
-        # RULE 1 — Freshness: must be within last 30 minutes
-        if zt < freshness_cutoff:
-            continue
-
-        # RULE 2 — Dedup: must be after the last saved DB signal
-        if last_time is not None and zt <= last_time:
-            continue
+        if last_time is not None:
+            # DB has data: only accept zones after the last known signal
+            if zt <= last_time:
+                continue
+        else:
+            # DB is empty: only accept zones from last 2 hours (anti-spam guard)
+            if zt < empty_db_cutoff:
+                continue
 
         new.append(z)
 
@@ -350,7 +381,7 @@ def calculate_history_for_symbol_timeframe(self, symbol: str, timeframe: str):
             logger.warning("Not enough data: %s %s", symbol, timeframe)
             return {"status": "no_data"}
 
-        result = AntiChopFilter(timeframe=timeframe).process(df)
+        result = AntiChopFilter(timeframe=timeframe).process(df, symbol=symbol, check_db=True)
         zones  = result.get("zones", [])
         saved  = _save_zones_to_db(symbol, timeframe, zones)
 
@@ -390,7 +421,9 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
         if df.empty or len(df) < 20:
             return {"status": "no_data"}
 
-        result    = AntiChopFilter(timeframe=timeframe).process(df)
+        # Pass symbol so AntiChopFilter seeds last_signal from DB
+        # This ensures correct BUY→SELL alternation across task runs
+        result    = AntiChopFilter(timeframe=timeframe).process(df, symbol=symbol, check_db=True)
         all_zones = result.get("zones", [])
 
         # Only save zones that are NEW (after last DB signal)
@@ -440,23 +473,66 @@ def calculate_all_history():
     return {"queued": count}
 
 
-@shared_task
-def update_all_recent_signals():
+@shared_task(bind=True, max_retries=0)
+def update_all_recent_signals(self):
     """
-    Incremental signal update for all symbols × timeframes.
-    Runs every 5 minutes — this is the reliable FALLBACK that catches signals
-    missed while WebSocket was down (primary path: _emit_live_signal in consumers.py).
+    SELF-PERPETUATING signal update — never depends solely on celery-beat.
+
+    THREE-LAYER reliability:
+      Layer 1 — celery-beat triggers this every 60 seconds (settings.py)
+      Layer 2 — task reschedules ITSELF at the end (self-perpetuating chain)
+                 so it keeps running even if celery-beat crashes or is misconfigured
+      Layer 3 — Redis distributed lock prevents overlap if both layers fire at once
+
+    If celery-beat is broken: task still runs every 60 sec via self-scheduling.
+    If celery-worker is broken: celery-beat re-queues on worker recovery.
+    Both broken simultaneously: monitoring alert fires (see HEARTBEAT_KEY in Redis).
     """
-    logger.info("🔄 5-min incremental signal update starting...")
+    r = None
+    lock_acquired = False
+    try:
+        r = _get_task_redis()
+        # ── Distributed lock — prevent two instances running simultaneously ──
+        lock_acquired = r.set(LOCK_KEY, "1", nx=True, ex=90)
+        if not lock_acquired:
+            logger.debug("update_all_recent_signals: skipping (another instance running)")
+            return {"status": "skipped_locked"}
+
+        # ── Heartbeat: update timestamp so monitoring knows beat is alive ────
+        r.set(HEARTBEAT_KEY, str(int(time.time())), ex=HEARTBEAT_TTL)
+
+    except Exception as redis_err:
+        logger.warning("Redis unavailable in update_all_recent_signals: %s", redis_err)
+        # Continue anyway — signal detection is more important than Redis
+
+    logger.info("🔄 Signal update starting (self-perpetuating)...")
     count = 0
-    for symbol in SYMBOLS:
-        for tf in ALL_TIMEFRAMES:
-            # No countdown delay — dispatch immediately for fastest execution
-            update_recent_signals_for_symbol_timeframe.apply_async(
-                args=[symbol, tf],
-            )
-            count += 1
-    logger.info("📋 Queued %d incremental tasks", count)
+    try:
+        for symbol in SYMBOLS:
+            for tf in ALL_TIMEFRAMES:
+                update_recent_signals_for_symbol_timeframe.apply_async(
+                    args=[symbol, tf],
+                )
+                count += 1
+        logger.info("📋 Queued %d signal-check tasks", count)
+    finally:
+        # ── Release lock ─────────────────────────────────────────────────────
+        if lock_acquired and r:
+            try:
+                r.delete(LOCK_KEY)
+            except Exception:
+                pass
+
+        # ── LAYER 2: Self-reschedule in 60 seconds ────────────────────────────
+        # This runs regardless of celery-beat status.
+        # Even if someone accidentally changes back to DatabaseScheduler or
+        # deletes the PeriodicTask, signals will keep running every 60 seconds.
+        try:
+            update_all_recent_signals.apply_async(countdown=60)
+            logger.debug("♻️ Self-rescheduled in 60 seconds")
+        except Exception as sched_err:
+            logger.error("Self-reschedule failed (beat is now the only trigger): %s", sched_err)
+
     return {"queued": count}
 
 

@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'security',
     'api_docs',
     'signal_alerts',
+    'landing',
 ]
 
 MIDDLEWARE = [

@@ -1,0 +1,738 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="SmartRisk FX - Professional cryptocurrency trading signals powered by advanced AI reversal detection algorithms. Real-time BUY/SELL signals for Bitcoin, Ethereum, Ripple, Litecoin.">
+    <meta name="keywords" content="crypto trading signals, bitcoin signals, ethereum signals, trading algorithm, reversal detection, binance signals">
+    <meta name="author" content="SmartRisk FX">
+    <meta property="og:title" content="SmartRisk FX - Trade Smarter with AI-Powered Signals">
+    <meta property="og:description" content="Professional-grade crypto trading signals with 99.9% uptime. 50K+ active traders across 150+ countries.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://smartriskfx.com">
+    <meta name="twitter:card" content="summary_large_image">
+    <title>SmartRisk FX | AI-Powered Crypto Trading Signals - Trade Smarter</title>
+    <link rel="canonical" href="https://smartriskfx.com/join">
+    <link rel="icon" type="image/png" href="{% static 'landing/smartriskfx-landing/assets/icons/favicon.png' %}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'landing/smartriskfx-landing/assets/css/main.css' %}">
+    <link rel="stylesheet" href="{% static 'landing/smartriskfx-landing/assets/css/animations.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-container">
+            <a href="https://smartriskfx.com/join" class="nav-logo">
+                <div class="logo-icon">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <circle cx="16" cy="16" r="14" stroke="url(#logoGrad)" stroke-width="2.5"/>
+                        <path d="M10 16L14 20L22 12" stroke="url(#logoGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <defs>
+                            <linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32">
+                                <stop offset="0%" stop-color="#00D4FF"/>
+                                <stop offset="100%" stop-color="#7B61FF"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <span class="logo-text">Smart<span class="logo-accent">Risk</span></span>
+            </a>
+
+            <div class="nav-menu" id="navMenu">
+                <a href="#features" class="nav-link">Features</a>
+                <a href="#how-it-works" class="nav-link">How It Works</a>
+                <a href="#pricing" class="nav-link">Pricing</a>
+                <a href="#testimonials" class="nav-link">Testimonials</a>
+                <a href="https://smartriskfx.com/learn" class="nav-link" target="_blank">Learn</a>
+                <a href="https://smartriskfx.com/about" class="nav-link" target="_blank">About</a>
+            </div>
+
+            <div class="nav-actions">
+                <a href="mailto:alberttyagi123@gmail.com" class="nav-contact-btn" title="Email us at trading@smartriskfx.com">
+                    <i class="fas fa-envelope"></i>
+                    <span>Contact</span>
+                </a>
+                <a href="https://smartriskfx.com/dashboard" class="nav-cta-btn" target="_blank">
+                    Launch Dashboard
+                    <i class="fas fa-arrow-right"></i>
+                </a>
+                <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle Menu">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero" id="hero">
+        <div class="hero-bg">
+            <div class="gradient-orb orb-1"></div>
+            <div class="gradient-orb orb-2"></div>
+            <div class="gradient-orb orb-3"></div>
+            <div class="grid-overlay"></div>
+        </div>
+
+        <div class="hero-container">
+            <div class="hero-badge" data-aos="fade-down">
+                <span class="live-dot"></span>
+                <span>Live SmartRisk Trading Signals</span>
+            </div>
+
+            <h1 class="hero-title" data-aos="fade-up" data-aos-delay="100">
+                Trade Smarter with<br>
+                <span class="gradient-text">SmartRisk Signals</span>
+            </h1>
+
+            <p class="hero-subtitle" data-aos="fade-up" data-aos-delay="200">
+                Professional cryptocurrency trading platform powered by advanced reversal 
+                detection algorithms. Get real-time <strong>BUY</strong> and <strong>SELL</strong> signals 
+                for Bitcoin, Ethereum, Ripple, and Litecoin across multiple timeframes.
+            </p>
+
+            <div class="hero-cta-group" data-aos="fade-up" data-aos-delay="300">
+                <a href="https://smartriskfx.com/dashboard" class="btn-primary" target="_blank">
+                    <i class="fas fa-rocket"></i>
+                    Launch Dashboard
+                </a>
+                <a href="https://smartriskfx.com/history" class="btn-secondary" target="_blank">
+                    <i class="fas fa-chart-line"></i>
+                    View Signal History
+                </a>
+            </div>
+
+            <div class="hero-stats" data-aos="fade-up" data-aos-delay="400">
+                <div class="stat-item">
+                    <div class="stat-number" data-count="4">0</div>
+                    <div class="stat-label">Cryptocurrencies</div>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <div class="stat-number" data-count="10">0</div>
+                    <div class="stat-label">Timeframes</div>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <div class="stat-number" data-count="24">0</div>
+                    <div class="stat-label">/7 Live Monitoring</div>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <div class="stat-text">Real-Time</div>
+                    <div class="stat-label">Signal Generation</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="scroll-indicator">
+            <div class="mouse">
+                <div class="wheel"></div>
+            </div>
+            <span>Scroll to explore</span>
+        </div>
+    </section>
+
+    <!-- Live Ticker -->
+    <div class="live-ticker">
+        <div class="ticker-track">
+            <div class="ticker-content">
+                <span class="ticker-item"><i class="fab fa-bitcoin"></i> BTCUSD <span class="price-up">$77,588.39 <i class="fas fa-caret-up"></i> +0.98%</span></span>
+                <span class="ticker-item"><i class="fab fa-ethereum"></i> ETHUSD <span class="price-up">$2,129.08 <i class="fas fa-caret-up"></i> +1.03%</span></span>
+                <span class="ticker-item"><i class="fas fa-coins"></i> XRPUSD <span class="price-down">$0.5234 <i class="fas fa-caret-down"></i> -0.45%</span></span>
+                <span class="ticker-item"><i class="fas fa-litecoin-sign"></i> LTCUSD <span class="price-up">$53.89 <i class="fas fa-caret-up"></i> +0.72%</span></span>
+                <span class="ticker-item"><i class="fas fa-gem"></i> XAUUSD <span class="price-up">$4,501.90 <i class="fas fa-caret-up"></i> +0.15%</span></span>
+                <span class="ticker-item"><i class="fas fa-signal"></i> SIGNALS: <span class="signal-buy">BUY BTC 5M</span></span>
+                <span class="ticker-item"><i class="fas fa-signal"></i> SIGNALS: <span class="signal-sell">SELL ETH 15M</span></span>
+                <span class="ticker-item"><i class="fas fa-users"></i> 50K+ Active Traders Online</span>
+            </div>
+            <div class="ticker-content" aria-hidden="true">
+                <span class="ticker-item"><i class="fab fa-bitcoin"></i> BTCUSD <span class="price-up">$77,588.39 <i class="fas fa-caret-up"></i> +0.98%</span></span>
+                <span class="ticker-item"><i class="fab fa-ethereum"></i> ETHUSD <span class="price-up">$2,129.08 <i class="fas fa-caret-up"></i> +1.03%</span></span>
+                <span class="ticker-item"><i class="fas fa-coins"></i> XRPUSD <span class="price-down">$0.5234 <i class="fas fa-caret-down"></i> -0.45%</span></span>
+                <span class="ticker-item"><i class="fas fa-litecoin-sign"></i> LTCUSD <span class="price-up">$53.89 <i class="fas fa-caret-up"></i> +0.72%</span></span>
+                <span class="ticker-item"><i class="fas fa-gem"></i> XAUUSD <span class="price-up">$4,501.90 <i class="fas fa-caret-up"></i> +0.15%</span></span>
+                <span class="ticker-item"><i class="fas fa-signal"></i> SIGNALS: <span class="signal-buy">BUY BTC 5M</span></span>
+                <span class="ticker-item"><i class="fas fa-signal"></i> SIGNALS: <span class="signal-sell">SELL ETH 15M</span></span>
+                <span class="ticker-item"><i class="fas fa-users"></i> 50K+ Active Traders Online</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Features Section -->
+    <section class="features" id="features">
+        <div class="section-container">
+            <div class="section-header" data-aos="fade-up">
+                <span class="section-tag">Powerful Features</span>
+                <h2 class="section-title">Advanced Technology for<br><span class="gradient-text">Smart Trading</span></h2>
+                <p class="section-subtitle">Advanced technology meets intuitive design to give you the edge in cryptocurrency trading</p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="feature-icon">
+                        <i class="fas fa-bullseye"></i>
+                    </div>
+                    <h3>SmartRisk Reversal Signals</h3>
+                    <p>Advanced TradingView Pine Script algorithm detects high-probability reversal zones in real-time with precision accuracy.</p>
+                    <div class="feature-link">
+                        <a href="https://smartriskfx.com/dashboard" target="_blank">Explore Signals <i class="fas fa-arrow-right"></i></a>
+                    </div>
+                </div>
+
+                <div class="feature-card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="feature-icon icon-purple">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <h3>Real-Time Market Data</h3>
+                    <p>Live WebSocket connection to Binance for instant price updates and signal generation with zero latency.</p>
+                    <div class="feature-link">
+                        <a href="https://smartriskfx.com/dashboard" target="_blank">View Live Data <i class="fas fa-arrow-right"></i></a>
+                    </div>
+                </div>
+
+                <div class="feature-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="feature-icon icon-green">
+                        <i class="fas fa-chart-bar"></i>
+                    </div>
+                    <h3>Multi-Timeframe Analysis</h3>
+                    <p>Track signals across 10 timeframes from 1-minute to daily charts for complete market coverage.</p>
+                    <div class="feature-link">
+                        <a href="https://smartriskfx.com/dashboard" target="_blank">Try Timeframes <i class="fas fa-arrow-right"></i></a>
+                    </div>
+                </div>
+
+                <div class="feature-card" data-aos="fade-up" data-aos-delay="400">
+                    <div class="feature-icon icon-orange">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3>Signal Alternation Protection</h3>
+                    <p>Intelligent filtering ensures signals always alternate BUY → SELL → BUY for quality trades only.</p>
+                    <div class="feature-link">
+                        <a href="https://smartriskfx.com/learn" target="_blank">Learn More <i class="fas fa-arrow-right"></i></a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-it-works" id="how-it-works">
+        <div class="section-container">
+            <div class="section-header" data-aos="fade-up">
+                <span class="section-tag">Simple Process</span>
+                <h2 class="section-title">How It <span class="gradient-text">Works</span></h2>
+                <p class="section-subtitle">Simple, powerful, and automated trading signal generation in three steps</p>
+            </div>
+
+            <div class="steps-container">
+                <div class="step-card" data-aos="fade-right" data-aos-delay="100">
+                    <div class="step-number">01</div>
+                    <div class="step-content">
+                        <div class="step-icon"><i class="fas fa-plug"></i></div>
+                        <h3>Connect to Live Data</h3>
+                        <p>Real-time WebSocket connection to Binance streams live market data 24/7 without interruption.</p>
+                    </div>
+                    <div class="step-connector"></div>
+                </div>
+
+                <div class="step-card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="step-number">02</div>
+                    <div class="step-content">
+                        <div class="step-icon"><i class="fas fa-brain"></i></div>
+                        <h3>SmartRisk Analyzes Patterns</h3>
+                        <p>Advanced reversal detection algorithm identifies high-probability entry zones automatically.</p>
+                    </div>
+                    <div class="step-connector"></div>
+                </div>
+
+                <div class="step-card" data-aos="fade-left" data-aos-delay="300">
+                    <div class="step-number">03</div>
+                    <div class="step-content">
+                        <div class="step-icon"><i class="fas fa-bell"></i></div>
+                        <h3>Get Instant Signals</h3>
+                        <p>Receive BUY and SELL signals directly on your chart with entry, stop-loss, and target zones.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dashboard Preview -->
+    <section class="dashboard-preview">
+        <div class="section-container">
+            <div class="preview-header" data-aos="fade-up">
+                <span class="section-tag">Live Dashboard</span>
+                <h2 class="section-title">Your Trading Command<br><span class="gradient-text">Center</span></h2>
+                <p class="section-subtitle">Professional-grade interface with real-time charts, signals, and analytics</p>
+            </div>
+
+            <div class="dashboard-mockup" data-aos="zoom-in" data-aos-delay="200">
+                <div class="mockup-frame">
+                    <div class="mockup-header">
+                        <div class="mockup-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+                        <div class="mockup-title">SmartRisk Dashboard</div>
+                        <div class="mockup-live">
+                            <span class="live-dot"></span> Live
+                        </div>
+                    </div>
+                    <div class="mockup-body">
+                        <div class="mockup-sidebar">
+                            <div class="watchlist-item active">
+                                <span class="coin">BTCUSD</span>
+                                <span class="price">$77,482.17</span>
+                                <span class="status active-dot">Active</span>
+                            </div>
+                            <div class="watchlist-item">
+                                <span class="coin">ETHUSD</span>
+                                <span class="price">$2,129.08</span>
+                                <span class="status">Select</span>
+                            </div>
+                            <div class="watchlist-item">
+                                <span class="coin">XAUUSD</span>
+                                <span class="price">$4,501.90</span>
+                                <span class="status">Select</span>
+                            </div>
+                            <div class="watchlist-item">
+                                <span class="coin">LTCUSD</span>
+                                <span class="price">$53.89</span>
+                                <span class="status">Select</span>
+                            </div>
+                        </div>
+                        <div class="mockup-chart">
+                            <div class="chart-toolbar">
+                                <span class="timeframe active">5M</span>
+                                <span class="timeframe">15M</span>
+                                <span class="timeframe">30M</span>
+                                <span class="timeframe">1H</span>
+                                <span class="timeframe">4H</span>
+                                <span class="timeframe">1D</span>
+                            </div>
+                            <div class="chart-signals">
+                                <div class="signal buy-signal">
+                                    <i class="fas fa-arrow-up"></i> BUY SIGNAL
+                                    <span>Bullish Reversal</span>
+                                </div>
+                                <div class="signal sell-signal">
+                                    <i class="fas fa-arrow-down"></i> SELL SIGNAL
+                                    <span>Bearish Reversal</span>
+                                </div>
+                            </div>
+                            <div class="chart-visual">
+                                <svg viewBox="0 0 600 200" class="chart-svg">
+                                    <defs>
+                                        <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stop-color="#00D4FF" stop-opacity="0.3"/>
+                                            <stop offset="100%" stop-color="#00D4FF" stop-opacity="0"/>
+                                        </linearGradient>
+                                    </defs>
+                                    <path d="M0,150 Q50,140 100,130 T200,120 T300,100 T400,110 T500,90 T600,80" 
+                                          fill="none" stroke="#00D4FF" stroke-width="2"/>
+                                    <path d="M0,150 Q50,140 100,130 T200,120 T300,100 T400,110 T500,90 T600,80 L600,200 L0,200 Z" 
+                                          fill="url(#chartGrad)"/>
+                                    <circle cx="300" cy="100" r="6" fill="#00D4FF" class="pulse-dot"/>
+                                    <circle cx="500" cy="90" r="6" fill="#FF4757" class="pulse-dot"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mockup-glow"></div>
+            </div>
+
+            <div class="preview-cta" data-aos="fade-up">
+                <a href="https://smartriskfx.com/dashboard" class="btn-primary btn-large" target="_blank">
+                    <i class="fas fa-external-link-alt"></i>
+                    Launch Full Dashboard
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Signal History Stats -->
+    <section class="signal-stats">
+        <div class="section-container">
+            <div class="stats-grid">
+                <div class="big-stat" data-aos="fade-up" data-aos-delay="100">
+                    <div class="big-stat-number" data-count="746">0</div>
+                    <div class="big-stat-label">Total Signals Generated</div>
+                    <div class="big-stat-sublabel">Last 5 months across all assets</div>
+                </div>
+                <div class="big-stat" data-aos="fade-up" data-aos-delay="200">
+                    <div class="big-stat-number green" data-count="369">0</div>
+                    <div class="big-stat-label">Buy Signals</div>
+                    <div class="big-stat-sublabel">Bullish reversal opportunities</div>
+                </div>
+                <div class="big-stat" data-aos="fade-up" data-aos-delay="300">
+                    <div class="big-stat-number red" data-count="377">0</div>
+                    <div class="big-stat-label">Sell Signals</div>
+                    <div class="big-stat-sublabel">Bearish reversal opportunities</div>
+                </div>
+            </div>
+            <div class="stats-cta" data-aos="fade-up">
+                <a href="https://smartriskfx.com/history" class="btn-secondary" target="_blank">
+                    <i class="fas fa-history"></i>
+                    View Complete Signal History
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section class="pricing" id="pricing">
+        <div class="section-container">
+            <div class="section-header" data-aos="fade-up">
+                <span class="section-tag">Pricing Plans</span>
+                <h2 class="section-title">Choose Your <span class="gradient-text">Plan</span></h2>
+                <p class="section-subtitle">Start free and upgrade as you grow. No credit card required.</p>
+            </div>
+
+            <div class="pricing-grid">
+                <div class="pricing-card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="pricing-header">
+                        <h3>Starter</h3>
+                        <div class="pricing-price">
+                            <span class="trial-badge">3 Days Free Trial</span>
+                        </div>
+                        <p class="pricing-desc">Full access to all features</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="fas fa-check"></i> All 4 Crypto Assets</li>
+                        <li><i class="fas fa-check"></i> All 10 Timeframes</li>
+                        <li><i class="fas fa-check"></i> Full Dashboard Access</li>
+                        <li><i class="fas fa-check"></i> Real-Time Charts</li>
+                        <li><i class="fas fa-check"></i> Signal History</li>
+                        <li><i class="fas fa-check"></i> Advanced Analytics</li>
+                        <li class="disabled"><i class="fas fa-times"></i> Signal Alerts (Email)</li>
+                    </ul>
+                    <a href="https://smartriskfx.com/dashboard" class="pricing-btn btn-outline" target="_blank">Start Free Trial</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section class="testimonials" id="testimonials">
+        <div class="section-container">
+            <div class="section-header" data-aos="fade-up">
+                <span class="section-tag">Trader Reviews</span>
+                <h2 class="section-title">Trusted by <span class="gradient-text">50,000+ Traders</span></h2>
+                <p class="section-subtitle">See what our community says about SmartRisk signals</p>
+            </div>
+
+            <div class="testimonials-grid">
+                <div class="testimonial-card" data-aos="fade-up" data-aos-delay="100">
+                    <div class="testimonial-stars">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                    </div>
+                    <p class="testimonial-text">"SmartRisk signals completely changed my trading game. The reversal detection is incredibly accurate. I've seen a 40% improvement in my win rate since using it."</p>
+                    <div class="testimonial-author">
+                        <div class="author-avatar">MK</div>
+                        <div class="author-info">
+                            <h4>Michael K.</h4>
+                            <span>Day Trader, USA</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="testimonial-card" data-aos="fade-up" data-aos-delay="200">
+                    <div class="testimonial-stars">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                    </div>
+                    <p class="testimonial-text">"The multi-timeframe analysis is a game-changer. I can confirm signals across 5M, 15M, and 1H before entering a trade. Best signal service I've used."</p>
+                    <div class="testimonial-author">
+                        <div class="author-avatar">SR</div>
+                        <div class="author-info">
+                            <h4>Sarah R.</h4>
+                            <span>Swing Trader, UK</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="testimonial-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="testimonial-stars">
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star"></i>
+                        <i class="fas fa-star-half-alt"></i>
+                    </div>
+                    <p class="testimonial-text">"As a beginner, the SmartRisk platform made crypto trading accessible. The clear BUY/SELL signals and educational resources helped me learn while earning."</p>
+                    <div class="testimonial-author">
+                        <div class="author-avatar">JL</div>
+                        <div class="author-info">
+                            <h4>James L.</h4>
+                            <span>Beginner Trader, Australia</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Platform Stats -->
+    <section class="platform-stats">
+        <div class="section-container">
+            <div class="platform-grid">
+                <div class="platform-stat" data-aos="zoom-in" data-aos-delay="100">
+                    <div class="platform-icon"><i class="fas fa-users"></i></div>
+                    <div class="platform-number" data-count="50000">0</div>
+                    <div class="platform-label">Active Traders</div>
+                </div>
+                <div class="platform-stat" data-aos="zoom-in" data-aos-delay="200">
+                    <div class="platform-icon"><i class="fas fa-server"></i></div>
+                    <div class="platform-number">99.9<span class="percent">%</span></div>
+                    <div class="platform-label">Uptime</div>
+                </div>
+                <div class="platform-stat" data-aos="zoom-in" data-aos-delay="300">
+                    <div class="platform-icon"><i class="fas fa-chart-line"></i></div>
+                    <div class="platform-number">$2B<span class="plus">+</span></div>
+                    <div class="platform-label">Trading Volume</div>
+                </div>
+                <div class="platform-stat" data-aos="zoom-in" data-aos-delay="400">
+                    <div class="platform-icon"><i class="fas fa-globe"></i></div>
+                    <div class="platform-number">150<span class="plus">+</span></div>
+                    <div class="platform-label">Countries</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Signal Alerts CTA -->
+    <section class="alerts-cta">
+        <div class="section-container">
+            <div class="alerts-content" data-aos="fade-up">
+                <div class="alerts-icon">
+                    <i class="fas fa-bell"></i>
+                </div>
+                <h2>Never Miss a Trading Opportunity</h2>
+                <p>Get instant email notifications when new trading signals are generated for your selected cryptocurrency and timeframe. Stay informed without constantly monitoring charts.</p>
+                <div class="alerts-buttons">
+                    <a href="https://smartriskfx.com/signal-alerts" class="btn-primary" target="_blank">
+                        <i class="fas fa-bell"></i>
+                        Setup Signal Alerts
+                    </a>
+                    <a href="https://smartriskfx.com/learn" class="btn-secondary" target="_blank">
+                        <i class="fas fa-graduation-cap"></i>
+                        Learn Trading
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Education Hub -->
+    <section class="education">
+        <div class="section-container">
+            <div class="education-grid">
+                <div class="education-content" data-aos="fade-right">
+                    <span class="section-tag">Trading Education Hub</span>
+                    <h2 class="section-title">Master Crypto Trading<br><span class="gradient-text">With SmartRisk Insights</span></h2>
+                    <p class="section-subtitle">From beginner fundamentals to advanced strategies — learn how professional traders combine technical analysis with SmartRisk signals to make confident trading decisions.</p>
+
+                    <div class="edu-stats">
+                        <div class="edu-stat">
+                            <span class="edu-number">50+</span>
+                            <span class="edu-label">Video Lessons</span>
+                        </div>
+                        <div class="edu-stat">
+                            <span class="edu-number">10K+</span>
+                            <span class="edu-label">Active Students</span>
+                        </div>
+                        <div class="edu-stat">
+                            <span class="edu-number">4.8★</span>
+                            <span class="edu-label">Average Rating</span>
+                        </div>
+                        <div class="edu-stat">
+                            <span class="edu-number">24/7</span>
+                            <span class="edu-label">Support Access</span>
+                        </div>
+                    </div>
+
+                    <div class="education-buttons">
+                        <a href="https://smartriskfx.com/learn" class="btn-primary" target="_blank">
+                            <i class="fas fa-play-circle"></i>
+                            Start Learning Free
+                        </a>
+                        <a href="https://smartriskfx.com/learn" class="btn-secondary" target="_blank">
+                            <i class="fas fa-book"></i>
+                            Browse Courses
+                        </a>
+                    </div>
+                </div>
+
+                <div class="education-visual" data-aos="fade-left">
+                    <div class="course-cards">
+                        <div class="course-card">
+                            <div class="course-level beginner">Beginner</div>
+                            <h4>Crypto Trading Fundamentals</h4>
+                            <div class="course-meta">
+                                <span><i class="fas fa-clock"></i> 4 weeks</span>
+                                <span><i class="fas fa-video"></i> 12 lessons</span>
+                            </div>
+                        </div>
+                        <div class="course-card">
+                            <div class="course-level intermediate">Intermediate</div>
+                            <h4>SmartRisk Trading Strategies</h4>
+                            <div class="course-meta">
+                                <span><i class="fas fa-clock"></i> 3 weeks</span>
+                                <span><i class="fas fa-video"></i> 10 lessons</span>
+                            </div>
+                        </div>
+                        <div class="course-card">
+                            <div class="course-level advanced">Advanced</div>
+                            <h4>Advanced Chart Analysis</h4>
+                            <div class="course-meta">
+                                <span><i class="fas fa-clock"></i> 5 weeks</span>
+                                <span><i class="fas fa-video"></i> 18 lessons</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="final-cta">
+        <div class="section-container">
+            <div class="cta-content" data-aos="fade-up">
+                <h2>Ready to Start Trading Smarter?</h2>
+                <p>Access professional-grade SmartRisk trading signals for free. No credit card required. Join 50,000+ traders who trust our AI-powered reversal detection.</p>
+                <div class="cta-buttons">
+                    <a href="https://smartriskfx.com/dashboard" class="btn-primary btn-large" target="_blank">
+                        <i class="fas fa-rocket"></i>
+                        Launch Dashboard Now
+                    </a>
+                    <a href="mailto:trading@smartriskfx.com" class="btn-secondary btn-large">
+                        <i class="fas fa-envelope"></i>
+                        Contact Our Team
+                    </a>
+                </div>
+                <div class="cta-trust">
+                    <span><i class="fas fa-shield-alt"></i> SSL Secured</span>
+                    <span><i class="fas fa-check-circle"></i> No Credit Card Required</span>
+                    <span><i class="fas fa-bolt"></i> Instant Access</span>
+                </div>
+                <div class="cta-email">
+                    <a href="mailto:trading@smartriskfx.com" class="email-link">
+                        <i class="fas fa-envelope"></i>
+                        trading@smartriskfx.com
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <a href="https://smartriskfx.com/join" class="footer-logo">
+                        <div class="logo-icon">
+                            <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+                                <circle cx="16" cy="16" r="14" stroke="url(#footerLogoGrad)" stroke-width="2.5"/>
+                                <path d="M10 16L14 20L22 12" stroke="url(#footerLogoGrad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                <defs>
+                                    <linearGradient id="footerLogoGrad" x1="0" y1="0" x2="32" y2="32">
+                                        <stop offset="0%" stop-color="#00D4FF"/>
+                                        <stop offset="100%" stop-color="#7B61FF"/>
+                                    </linearGradient>
+                                </defs>
+                            </svg>
+                        </div>
+                        <span class="logo-text">Smart<span class="logo-accent">Risk</span></span>
+                    </a>
+                    <p class="footer-desc">Professional cryptocurrency trading platform powered by advanced AI reversal detection algorithms.</p>
+                    <div class="footer-social">
+                        <a href="#" aria-label="Twitter"><i class="fab fa-twitter"></i></a>
+                        <a href="#" aria-label="Telegram"><i class="fab fa-telegram"></i></a>
+                        <a href="#" aria-label="Discord"><i class="fab fa-discord"></i></a>
+                        <a href="#" aria-label="YouTube"><i class="fab fa-youtube"></i></a>
+                    </div>
+                </div>
+
+                <div class="footer-links">
+                    <h4>Platform</h4>
+                    <ul>
+                        <li><a href="https://smartriskfx.com/dashboard" target="_blank">Dashboard</a></li>
+                        <li><a href="https://smartriskfx.com/history" target="_blank">Signal History</a></li>
+                        <li><a href="https://smartriskfx.com/signal-alerts" target="_blank">Signal Alerts</a></li>
+                        <li><a href="https://smartriskfx.com/subscription" target="_blank">Subscription</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-links">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="https://smartriskfx.com/learn" target="_blank">Learn Center</a></li>
+                        <li><a href="https://smartriskfx.com/about" target="_blank">About Us</a></li>
+                        <li><a href="#features">Features</a></li>
+                        <li><a href="#pricing">Pricing</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-links">
+                    <h4>Contact</h4>
+                    <ul>
+                        <li>
+                            <a href="mailto:trading@smartriskfx.com" class="contact-link">
+                                <i class="fas fa-envelope"></i>
+                                trading@smartriskfx.com
+                            </a>
+                        </li>
+                        <li>
+                            <a href="mailto:vishal@smartriskfx.com" class="contact-link">
+                                <i class="fas fa-headset"></i>
+                                vishal@smartriskfx.com
+                            </a>
+                        </li>
+                        <li>
+                            <a href="mailto:vishal@smartriskfx.com" class="contact-link">
+                                <i class="fas fa-handshake"></i>
+                                vishal@smartriskfx.com
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="footer-bottom">
+                <div class="footer-copyright">
+                    <p> 2024-2026 SmartRisk FX. All rights reserved.</p>
+                </div>
+                <div class="footer-legal">
+                    <a href="#">Privacy Policy</a>
+                    <a href="#">Terms of Service</a>
+                    <a href="#">Risk Disclosure</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Back to Top -->
+    <button class="back-to-top" id="backToTop" aria-label="Back to top">
+        <i class="fas fa-arrow-up"></i>
+    </button>
+
+    <script src="{% static 'landing/smartriskfx-landing/assets/js/main.js' %}"></script>
+    <script src="{% static 'landing/smartriskfx-landing/assets/js/animations.js' %}"></script>
+</body>
+</html>

@@ -286,18 +286,28 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
 
 def _filter_new_only(zones: list, last_db: dict | None) -> list:
     """
-    Return only zones that are BOTH:
-    1. Within the last 30 minutes (HARD freshness cutoff — prevents old signal spam
-       when DB is empty after a fresh deploy or DB wipe)
-    2. After the last DB signal timestamp (prevents duplicate saves)
+    Return only zones that are AFTER the last saved DB signal timestamp.
 
-    The 30-min window means: even if DB is empty, we NEVER email signals older
-    than 30 minutes. Users only ever receive alerts for truly new signals.
+    IMPORTANT: We do NOT apply a time-based freshness cutoff here because
+    `reversal_time` is the candle's CLOSE timestamp, not when it was detected.
+    A 4H candle that closed at 08:00 and gets detected at 09:30 has
+    reversal_time=08:00 — a 30-min cutoff would block it entirely.
+
+    The only cutoff that matters is:
+    - If DB has a previous signal: zone must be AFTER that signal's reversal_time
+    - If DB is empty (fresh deploy): only save zones from last 2 hours maximum
+      to prevent emailing days-old historical signals after a DB wipe.
+
+    The 10-min freshness in signals.py (using created_at) handles preventing
+    old DB rows from triggering emails.
     """
     from datetime import datetime, timedelta as _td
     now_utc = datetime.now(pytz.utc)
-    # Hard cutoff: signals older than 30 minutes are NEVER treated as "new"
-    freshness_cutoff = now_utc - _td(minutes=30)
+
+    # When DB is empty: only process signals from the last 2 hours
+    # This prevents emailing 2-3 day old signals after a fresh DB wipe/deploy.
+    # 2 hours is generous enough to catch any timeframe (even 1H/4H) correctly.
+    empty_db_cutoff = now_utc - _td(hours=2)
 
     # Normalise last_db timestamp once
     last_time = None
@@ -322,13 +332,14 @@ def _filter_new_only(zones: list, last_db: dict | None) -> list:
         if zt.tzinfo is None:
             zt = pytz.utc.localize(zt)
 
-        # RULE 1 — Freshness: must be within last 30 minutes
-        if zt < freshness_cutoff:
-            continue
-
-        # RULE 2 — Dedup: must be after the last saved DB signal
-        if last_time is not None and zt <= last_time:
-            continue
+        if last_time is not None:
+            # DB has data: only accept zones after the last known signal
+            if zt <= last_time:
+                continue
+        else:
+            # DB is empty: only accept zones from last 2 hours (anti-spam guard)
+            if zt < empty_db_cutoff:
+                continue
 
         new.append(z)
 

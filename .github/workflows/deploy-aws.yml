@@ -100,40 +100,67 @@ jobs:
             sudo docker-compose build django celery_worker celery_beat frontend
           EOF
 
-      - name: 🔐 Obtain SSL certificate (staging – no rate limits)
+      - name: 🔐 Check/Obtain SSL certificate
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Remove any old/corrupted certificate data
-            sudo rm -rf ./nginx/ssl/live/smartriskfx.com
-            sudo rm -rf ./nginx/ssl/archive/smartriskfx.com
+            # Check if valid certificate already exists
+            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ] && \
+               [ -f ./nginx/ssl/live/smartriskfx.com/privkey.pem ]; then
+              echo "✅ SSL certificate already exists, skipping renewal"
+              sudo chmod -R 755 ./nginx/ssl
+              exit 0
+            fi
 
-            echo "🔐 Obtaining TEST certificate from Let's Encrypt staging..."
+            echo "🔐 Obtaining SSL certificate from Let's Encrypt..."
             sudo fuser -k 80/tcp || true
 
-            # CORRECT DOMAIN NAME (no typo)
-            sudo docker run --rm \
-              -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-              -p 80:80 \
-              certbot/certbot certonly --standalone \
-              -d smartriskfx.com \
-              -d www.smartriskfx.com \
-              --email ${{ secrets.CERTBOT_EMAIL }} \
-              --agree-tos \
-              --no-eff-email \
-              --non-interactive \
-              --test-cert
+            # Try to obtain certificate with retries
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
+              
+              sudo docker run --rm \
+                -v $(pwd)/nginx/ssl:/etc/letsencrypt \
+                -p 80:80 \
+                certbot/certbot certonly --standalone \
+                -d smartriskfx.com \
+                -d www.smartriskfx.com \
+                --email ${{ secrets.CERTBOT_EMAIL }} \
+                --agree-tos \
+                --no-eff-email \
+                --non-interactive \
+                --test-cert
+              
+              if [ $? -eq 0 ]; then
+                echo "✅ SSL certificate obtained successfully!"
+                sudo chmod -R 755 ./nginx/ssl
+                exit 0
+              fi
+              
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "⏳ Waiting 30 seconds before retry..."
+                sleep 30
+              fi
+            done
 
-            if [ $? -eq 0 ]; then
-              echo "✅ Staging SSL certificate obtained!"
+            # If all retries failed, check if we can continue without SSL
+            echo "⚠️ SSL certificate generation failed after $MAX_RETRIES attempts"
+            echo "Checking if existing certificate can be used..."
+            
+            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
+              echo "✅ Found existing certificate, will use it"
               sudo chmod -R 755 ./nginx/ssl
+              exit 0
             else
-              echo "❌ SSL certificate failed. Check DNS resolution for smartriskfx.com and port 80."
-              # Diagnostic: show DNS resolution
-              echo "=== DNS lookup for smartriskfx.com ==="
-              dig smartriskfx.com +short || nslookup smartriskfx.com
-              exit 1
+              echo "❌ No valid certificate found. Deployment will continue with HTTP only."
+              echo "You can manually run certbot later when Let's Encrypt is available."
+              # Don't fail the deployment, just warn
+              exit 0
             fi
           EOF
 
@@ -257,13 +284,36 @@ jobs:
 
       - name: 📊 Deployment Summary
         run: |
-          echo "=========================================================================="
-          echo "✅ DEPLOYMENT SUCCESSFUL!"
-          echo "=========================================================================="
-          echo "🌐 https://smartriskfx.com"
-          echo "🔒 SSL is active (staging certificate – browser will show 'Not Secure')"
-          echo "⚠️ To get a production certificate, set '--test-cert' and '--staging' flags to false after rate limit expires."
-          echo "=========================================================================="
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            
+            # Check SSL certificate status
+            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
+              SSL_STATUS="✅ SSL Active"
+              CERT_TYPE=$(sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT" && echo "Staging" || echo "Production")
+            else
+              SSL_STATUS="⚠️ HTTP Only (SSL certificate pending)"
+              CERT_TYPE="None"
+            fi
+            
+            echo "=========================================================================="
+            echo "✅ DEPLOYMENT SUCCESSFUL!"
+            echo "=========================================================================="
+            echo "🌐 Website: https://smartriskfx.com"
+            echo "� Landing Page: https://smartriskfx.com/join"
+            echo "🔒 SSL Status: $SSL_STATUS ($CERT_TYPE)"
+            echo "🐳 Docker Services:"
+            sudo docker-compose ps --format "table {{.Service}}\t{{.Status}}"
+            echo "=========================================================================="
+            echo "📝 Next Steps:"
+            echo "  1. Visit https://smartriskfx.com/join to test landing page"
+            echo "  2. Check all links and buttons work"
+            echo "  3. Test mobile responsiveness"
+            if [ "$CERT_TYPE" = "Staging" ]; then
+              echo "  4. Replace staging SSL with production cert when ready"
+            fi
+            echo "=========================================================================="
+          EOF
 
   notify-failure:
     name: Notify on Failure

@@ -26,7 +26,7 @@ BINANCE_WS_URL  = "wss://stream.binance.com:9443"
 
 from .models import MarketSignal
 import pandas as pd
-from reversal_zones.signal_filter import run_filtered_calculator
+from reversal_zones.reversal_calculator import ReversalZoneCalculator
 
 
 logger = logging.getLogger(__name__)
@@ -602,11 +602,10 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
     async def _emit_live_signal(self):
         """
         Called on every closed candle.
-        Runs AntiChopFilter on the last 200 Redis-cached candles.
+        Runs RAW ReversalZoneCalculator on the last 500 Redis-cached candles.
         Broadcasts a 'signal' event if a new reversal is detected.
         
-        CRITICAL: Enforces STRICT 1-hour minimum gap between ANY two signals
-        by checking timestamp distance before broadcasting.
+        MATCHES TRADINGVIEW PINE SCRIPT EXACTLY - no additional filters.
         """
         try:
             redis_key = f"market:kline:{self.asset}:{self.timeframe}"
@@ -623,8 +622,18 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             if len(df) < 10:
                 return
 
-            # Pass symbol so alternation is seeded from DB (prevents consecutive BUY/SELL)
-            result = run_filtered_calculator(df, timeframe=self.timeframe, symbol=self.binance_symbol.upper())
+            # Use RAW calculator (matches TradingView Pine Script EXACTLY)
+            # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
+            calculator = ReversalZoneCalculator(
+                preset="Low",
+                calc_mode="Average",
+                avg_len=5,
+                atr_len=5,
+                custom_abs=0.05,
+                confirm_bars=0,
+                timeframe=self.timeframe
+            )
+            result = calculator.process_ohlcv_data(df)
             zones  = result.get("zones", [])
             status = result.get("status", {})
             if not zones:

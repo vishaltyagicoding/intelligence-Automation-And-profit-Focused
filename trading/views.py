@@ -142,7 +142,6 @@ def get_reversal_zones(request, symbol):
     """
     import pandas as pd
     from reversal_zones.reversal_calculator import ReversalZoneCalculator
-    from reversal_zones.signal_filter import AntiChopFilter
     from reversal_zones.models import ReversalZone
     from django.core.cache import cache
     from django.utils.dateparse import parse_datetime
@@ -211,18 +210,18 @@ def get_reversal_zones(request, symbol):
                 times.append(df.index[i])
             df = pd.DataFrame(rows, index=times)
 
-        # ── Step 2: Run filtered reversal calculator (live signals) ───────────
-        # First, get DB timestamps to avoid duplicates
-        db_records = ReversalZone.objects.filter(
-            symbol=binance_symbol,
-            timeframe=timeframe,
-        ).order_by('reversal_time')
-        
-        db_timestamps_set = {rec.reversal_time.isoformat() for rec in db_records}
-        
-        # Pass binance_symbol and db_timestamps to filter
-        filt = AntiChopFilter(timeframe=timeframe)
-        result = filt.process(df, symbol=binance_symbol, check_db=True, db_timestamps=db_timestamps_set)
+        # ── Step 2: Run RAW reversal calculator (matches TradingView EXACTLY) ─
+        # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
+        calculator = ReversalZoneCalculator(
+            preset="Low",
+            calc_mode="Average",
+            avg_len=5,
+            atr_len=5,
+            custom_abs=0.05,
+            confirm_bars=0,
+            timeframe=timeframe
+        )
+        result = calculator.process_ohlcv_data(df)
         live_zones = result['zones']
 
         # ── Step 3: Format live zones for response ────────────────────────────
@@ -288,8 +287,8 @@ def get_reversal_zones(request, symbol):
 def get_signal_history(request, symbol):
     """
     Return ALL permanently stored BUY/SELL signals from DB for a symbol+timeframe.
-    Applies time-distance filter to remove clustered/noisy signals.
-    No count limit — all quality signals from last 30 days are returned.
+    NO filtering - returns exactly what the calculator generated.
+    This ensures signals match TradingView exactly.
 
     GET /api/trading/signal-history/BTCUSD/?timeframe=1m
     """
@@ -297,13 +296,6 @@ def get_signal_history(request, symbol):
     from django.utils import timezone as tz
 
     timeframe = request.GET.get('timeframe', '4h')
-
-    MIN_MINUTES = {
-        "1m": 60, "3m": 60, "5m": 60, "10m": 60,
-        "15m": 60, "30m": 60, "1h": 60, "2h": 60,
-        "4h": 60, "1d": 60,
-    }
-    min_minutes = MIN_MINUTES.get(timeframe, 60)
 
     # Special mapping: XAUUSD uses PAXG (Paxos Gold) on Binance
     ASSET_BINANCE_MAP = {'XAUUSD': 'PAXGUSDT'}
@@ -324,33 +316,11 @@ def get_signal_history(request, symbol):
             reversal_time__gte=since,
         ).order_by('reversal_time')
 
-        # Apply BOTH checks:
-        # 1. Minimum 1-hour time gap between ANY two signals
-        # 2. Strict alternation: BUY → SELL → BUY → SELL
-        filtered = []
-        last_signal = None   # last accepted signal type
-        last_time   = None   # last accepted signal time
-
-        for rec in records:
-            signal = rec.label_text
-            ts     = rec.reversal_time
-
-            # ── Check 1: 1-hour minimum time gap ─────────────────────────
-            if last_time is not None:
-                minutes_since = (ts - last_time).total_seconds() / 60.0
-                if minutes_since < min_minutes:
-                    continue  # Too soon after last signal
-
-            # ── Check 2: Strict alternation (BUY→SELL→BUY) ───────────────
-            if last_signal is not None and last_signal == signal:
-                continue  # Same type as last — skip
-
-            last_signal = signal
-            last_time   = ts
-            filtered.append(rec)
-
+        # NO FILTERING - return all signals exactly as calculator generated them
+        # The calculator already enforces alternation via swing_dir logic
+        # Any additional filtering would cause mismatch with TradingView
         signals = []
-        for rec in filtered:
+        for rec in records:
             is_bull   = rec.is_bullish
             entry     = round(float(rec.center_price), 2)
             outer_top = round(float(rec.outer_top),    2)

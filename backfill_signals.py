@@ -93,7 +93,7 @@ def save_zones(symbol, timeframe, zones):
                 print(f"    Save error: {e}")
     return saved
 
-from reversal_zones.signal_filter import AntiChopFilter
+from reversal_zones.reversal_calculator import ReversalZoneCalculator
 
 total_saved = 0
 for symbol in SYMBOLS:
@@ -105,7 +105,19 @@ for symbol in SYMBOLS:
             print("no data"); continue
         if tf == "10m": df = agg_10m(df)
         try:
-            zones = AntiChopFilter(timeframe=tf).process(df).get("zones", [])
+            # Use RAW calculator (matches TradingView Pine Script EXACTLY)
+            # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
+            calculator = ReversalZoneCalculator(
+                preset="Low",
+                calc_mode="Average",
+                avg_len=5,
+                atr_len=5,
+                custom_abs=0.05,
+                confirm_bars=0,
+                timeframe=tf
+            )
+            result = calculator.process_ohlcv_data(df)
+            zones = result.get("zones", [])
             saved = save_zones(symbol, tf, zones)
             total_saved += saved
             print(f"{len(df)} candles -> {len(zones)} signals -> {saved} new saved")

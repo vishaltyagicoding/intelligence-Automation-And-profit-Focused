@@ -213,6 +213,15 @@ jobs:
             sudo docker-compose exec -T django python manage.py collectstatic --noinput
           EOF
 
+      - name: 🎨 Copy landing page assets to nginx
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            # Copy landing page assets to nginx container
+            sudo docker cp smartriskfx-landing/assets neuraltrade_nginx:/usr/share/nginx/html/landing-assets
+            echo "✅ Landing page assets copied to nginx"
+          EOF
+
       - name: 👤 Create superuser
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'

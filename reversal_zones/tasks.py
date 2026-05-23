@@ -367,7 +367,7 @@ def calculate_history_for_symbol_timeframe(self, symbol: str, timeframe: str):
     Full history recalculation for one symbol+timeframe.
     Called by calculate_all_history() daily.
     """
-    from reversal_zones.signal_filter import AntiChopFilter
+    from reversal_zones.reversal_calculator import ReversalZoneCalculator
 
     binance_tf = BINANCE_TF.get(timeframe, "1h")
     days_back  = DAYS_BACK.get(timeframe, 30)
@@ -381,7 +381,18 @@ def calculate_history_for_symbol_timeframe(self, symbol: str, timeframe: str):
             logger.warning("Not enough data: %s %s", symbol, timeframe)
             return {"status": "no_data"}
 
-        result = AntiChopFilter(timeframe=timeframe).process(df, symbol=symbol, check_db=True)
+        # Use RAW calculator (matches TradingView Pine Script EXACTLY)
+        # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
+        calculator = ReversalZoneCalculator(
+            preset="Low",
+            calc_mode="Average",
+            avg_len=5,
+            atr_len=5,
+            custom_abs=0.05,
+            confirm_bars=0,
+            timeframe=timeframe
+        )
+        result = calculator.process_ohlcv_data(df)
         zones  = result.get("zones", [])
         saved  = _save_zones_to_db(symbol, timeframe, zones)
 
@@ -409,7 +420,7 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
     This is the task that makes signal detection CONTINUOUS.
     Runs every 30 minutes for all 4 symbols × 7 timeframes = 28 tasks.
     """
-    from reversal_zones.signal_filter import AntiChopFilter
+    from reversal_zones.reversal_calculator import ReversalZoneCalculator
 
     binance_tf = BINANCE_TF.get(timeframe, "1h")
     hours_back = RECENT_HOURS.get(timeframe, 48)
@@ -421,9 +432,18 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
         if df.empty or len(df) < 20:
             return {"status": "no_data"}
 
-        # Pass symbol so AntiChopFilter seeds last_signal from DB
-        # This ensures correct BUY→SELL alternation across task runs
-        result    = AntiChopFilter(timeframe=timeframe).process(df, symbol=symbol, check_db=True)
+        # Use RAW calculator (matches TradingView Pine Script EXACTLY)
+        # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
+        calculator = ReversalZoneCalculator(
+            preset="Low",
+            calc_mode="Average",
+            avg_len=5,
+            atr_len=5,
+            custom_abs=0.05,
+            confirm_bars=0,
+            timeframe=timeframe
+        )
+        result    = calculator.process_ohlcv_data(df)
         all_zones = result.get("zones", [])
 
         # Only save zones that are NEW (after last DB signal)

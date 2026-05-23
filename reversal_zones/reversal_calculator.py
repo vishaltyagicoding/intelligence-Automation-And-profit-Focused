@@ -260,24 +260,14 @@ def _professional_sl_target(
 
 
 def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
-    """
-    Average True Range — exact Pine Script ta.atr() port.
-
-    Pine ta.atr(length) = ta.rma(ta.tr(true), length)
-    ta.rma uses Wilder smoothing: alpha = 1/length, equivalent to ewm(com=length-1).
-    
-    CRITICAL: Must NOT use ewm(span=length) — that is standard EMA with alpha=2/(length+1).
-    For length=5: EMA alpha=0.333 vs RMA alpha=0.200 — produces ~7-10% different ATR values,
-    causing the threshold to differ from Pine → different signals generated.
-    """
+    """Average True Range."""
     prev_close = close.shift(1)
     tr = pd.concat([
         high - low,
         (high - prev_close).abs(),
         (low - prev_close).abs(),
     ], axis=1).max(axis=1)
-    # Pine ta.rma = Wilder smoothing = ewm(com=length-1, adjust=False)
-    return tr.ewm(com=length - 1, adjust=False).mean()
+    return tr.ewm(span=length, adjust=False).mean()
 
 
 class ReversalZoneCalculator:
@@ -483,13 +473,9 @@ class ReversalZoneCalculator:
         # Replace the old tiny outer_half formula with swing-structure SL/Target.
         # outer_top  = higher price level  (target for BUY,  stop loss for SELL)
         # outer_bottom = lower price level (stop loss for BUY, target for SELL)
-        # Return ALL reversals (not limited by max_zones).
-        # max_zones in Pine Script is a DISPLAY limit (max boxes on chart).
-        # In Python we need ALL reversals so the DB is complete.
-        # The Celery task already handles limiting via _filter_new_only.
         zones = []
         n_df = len(df)
-        for r in self.reversals:
+        for r in self.reversals[-self.cfg.max_zones:]:
             bar_idx = min(max(r.bar_index, 0), n_df - 1)
 
             # ATR at the signal bar (fallback: 0.2% of price)

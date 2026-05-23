@@ -5,6 +5,7 @@ from django.shortcuts import render
 from django.views.decorators.cache import cache_page
 from django.http import HttpResponse
 from pathlib import Path
+import re
 
 
 @cache_page(60 * 15)  # Cache for 15 minutes
@@ -19,9 +20,17 @@ def landing_page(request):
         with open(html_file, 'r', encoding='utf-8') as f:
             html_content = f.read()
         
-        # Replace relative asset paths with absolute paths
-        html_content = html_content.replace('href="assets/', 'href="/static-landing/assets/')
-        html_content = html_content.replace('src="assets/', 'src="/static-landing/assets/')
+        # Replace all asset paths with /static-landing/ paths
+        # Handle both href and src attributes
+        html_content = re.sub(r'href="assets/', 'href="/static-landing/', html_content)
+        html_content = re.sub(r'src="assets/', 'src="/static-landing/', html_content)
+        
+        # Also handle any {% static %} tags if present
+        html_content = re.sub(
+            r'{%\s*static\s*[\'"]landing/smartriskfx-landing/assets/([^\'"]+)[\'"]\s*%}',
+            r'/static-landing/\1',
+            html_content
+        )
         
         return HttpResponse(html_content, content_type='text/html')
     else:

@@ -486,19 +486,18 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         """
         Persist a confirmed reversal signal to the ReversalZone table.
 
-        KEY FIX: use update_or_create on (symbol, timeframe, reversal_time)
-        NOT bar_index — bar_index is relative and shifts every API call,
-        causing duplicate rows or stale data.  reversal_time is the stable,
-        canonical identifier for a signal.
+        Uses transaction.atomic() + select_for_update() to enforce alternation
+        atomically. This prevents the race condition where:
+        1. WebSocket reads last_signal = SELL (check passes for BUY)
+        2. Celery task also reads last_signal = SELL (check passes for BUY)
+        3. Both save BUY → consecutive BUY-BUY in DB
 
-        • If the same signal fires again (e.g. stream reconnect) the row is
-          UPDATED with the latest outer_top/outer_bottom (correct SL/Target).
-        • Consecutive BUY/SELL violations are caught by the DB trigger and
-          logged as INFO (not errors) — this is expected alternation enforcement.
+        With select_for_update the second writer blocks until the first commits,
+        then re-reads the (now BUY) last signal and blocks the duplicate.
         """
         try:
             from reversal_zones.models import ReversalZone
-            from django.db import IntegrityError
+            from django.db import IntegrityError, transaction
             import pytz
 
             ts = zone.get("timestamp")
@@ -520,36 +519,53 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             is_bull = zone.get("is_bullish", True)
             label   = "BUY" if is_bull else "SELL"
 
-            # ── Use reversal_time as the unique key (stable across restarts) ──
-            obj, created = ReversalZone.objects.update_or_create(
-                symbol        = symbol,
-                timeframe     = timeframe,
-                reversal_time = reversal_time,
-                defaults={
-                    "center_price":  zone.get("center_price", 0),
-                    "stop_loss":     zone.get("stop_loss"),      # NEW: Save calculated stop_loss
-                    "target":        zone.get("target"),         # NEW: Save calculated target
-                    "outer_top":     zone.get("outer_top",    0),
-                    "outer_bottom":  zone.get("outer_bottom", 0),
-                    "core_top":      zone.get("core_top",     0),
-                    "core_bottom":   zone.get("core_bottom",  0),
-                    "is_bullish":    is_bull,
-                    "label_text":    label,
-                    "bar_index":     zone.get("bar_index", 0),
-                },
-            )
+            with transaction.atomic():
+                # ── Re-read last signal WITH row lock inside the transaction ──
+                # This serializes concurrent WebSocket + Celery saves and prevents
+                # the race condition that causes consecutive BUY-BUY or SELL-SELL.
+                last_row = (
+                    ReversalZone.objects
+                    .filter(symbol=symbol, timeframe=timeframe)
+                    .select_for_update()
+                    .order_by("-reversal_time")
+                    .values("label_text", "reversal_time")
+                    .first()
+                )
+
+                if last_row and last_row["label_text"] == label:
+                    logger.info(
+                        "🛡️ ALTERNATION BLOCKED (atomic lock) [%s %s]: "
+                        "cannot save %s after %s",
+                        symbol, timeframe, label, last_row["label_text"],
+                    )
+                    return  # Silently drop — correct behaviour
+
+                # ── Save signal (alternation verified inside transaction) ──────
+                obj, created = ReversalZone.objects.update_or_create(
+                    symbol        = symbol,
+                    timeframe     = timeframe,
+                    reversal_time = reversal_time,
+                    defaults={
+                        "center_price":  zone.get("center_price", 0),
+                        "stop_loss":     zone.get("stop_loss"),
+                        "target":        zone.get("target"),
+                        "outer_top":     zone.get("outer_top",    0),
+                        "outer_bottom":  zone.get("outer_bottom", 0),
+                        "core_top":      zone.get("core_top",     0),
+                        "core_bottom":   zone.get("core_bottom",  0),
+                        "is_bullish":    is_bull,
+                        "label_text":    label,
+                        "bar_index":     zone.get("bar_index", 0),
+                    },
+                )
+
             action = "💾 Created" if created else "🔄 Updated"
-            
-            # Use the new stop_loss and target fields if available, fallback to outer_top/outer_bottom
             db_stop_loss = float(obj.stop_loss) if obj.stop_loss else float(obj.outer_bottom if is_bull else obj.outer_top)
-            db_target = float(obj.target) if obj.target else float(obj.outer_top if is_bull else obj.outer_bottom)
-            
+            db_target    = float(obj.target)    if obj.target    else float(obj.outer_top    if is_bull else obj.outer_bottom)
             logger.info(
                 "%s %s signal in DB: %s %s @ %.2f  SL=%.2f  TP=%.2f",
                 action, obj.label_text, symbol, timeframe,
-                float(obj.center_price),
-                db_stop_loss,
-                db_target,
+                float(obj.center_price), db_stop_loss, db_target,
             )
 
         except (IntegrityError, Exception) as exc:
@@ -626,17 +642,10 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             # 3. Save to database (triggers email via Django signal handler)
             # ═══════════════════════════════════════════════════════════════════
             
-            # Check last signal from database to enforce alternation
-            last_db_signal = await self._get_last_db_signal(self.binance_symbol.upper(), self.timeframe)
-            
-            # Enforce alternation: after BUY only SELL, after SELL only BUY
-            if last_db_signal:
-                if last_db_signal == new_signal:
-                    logger.debug(
-                        "⏸️ Alternation BLOCKED [%s %s]: %s after %s - must alternate",
-                        self.asset, self.timeframe, new_signal, last_db_signal
-                    )
-                    return  # Skip this signal, must alternate
+            # NOTE: Alternation is now enforced atomically INSIDE _save_signal_to_db
+            # using select_for_update() — no pre-check needed here.
+            # Pre-checking here caused a race condition: between the check and save,
+            # another writer (Celery task) could insert the same signal type.
 
             # ══════════════════════════════════════════════════════════════════
             # FIX: Use actual current close price as ENTRY — not the pivot price.

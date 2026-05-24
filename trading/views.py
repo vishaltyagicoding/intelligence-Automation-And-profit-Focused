@@ -172,11 +172,11 @@ def get_reversal_zones(request, symbol):
         return Response(cached)
 
     try:
-        # Binance.US — server is in California; binance.com is geo-blocked for US servers.
-        # Frontend REST also uses Binance.US so historical + live data are always in sync.
+        # Binance.com (global) — same data source as TradingView
+        # This ensures signals match TradingView exactly
         limit = 500 if timeframe == '1d' else 1000
         url = (
-            f"https://api.binance.us/api/v3/klines"
+            f"https://api.binance.com/api/v3/klines"
             f"?symbol={binance_symbol}&interval={binance_tf}&limit={limit}"
         )
         resp = http_requests.get(url, timeout=15)

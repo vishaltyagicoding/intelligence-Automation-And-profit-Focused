@@ -216,7 +216,7 @@ class Command(BaseCommand):
 
         while current < end_ts:
             url = (
-                f"https://api.binance.us/api/v3/klines"
+                f"https://api.binance.com/api/v3/klines"
                 f"?symbol={symbol}&interval={binance_tf}"
                 f"&startTime={current}&limit={limit}"
             )

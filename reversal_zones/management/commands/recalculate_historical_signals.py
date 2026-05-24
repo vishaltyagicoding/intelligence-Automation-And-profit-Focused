@@ -221,7 +221,7 @@ class Command(BaseCommand):
             start_time = int((reversal_time - timedelta(hours=100)).timestamp() * 1000)
             end_time = int((reversal_time + timedelta(hours=10)).timestamp() * 1000)
 
-            url = 'https://api.binance.us/api/v3/klines'
+            url = 'https://api.binance.com/api/v3/klines'
             params = {
                 'symbol': symbol,
                 'interval': interval,

@@ -104,14 +104,19 @@ def _fetch_binance_recent(symbol: str, interval: str, days_back: int) -> pd.Data
 
 
 def _fetch_range(symbol: str, interval: str, start_ts: int, end_ts: int) -> pd.DataFrame:
-    """Core paginated Binance klines fetch."""
+    """
+    Core paginated Binance klines fetch.
+    
+    CRITICAL: Uses Binance.com (global) - same data source as TradingView.
+    This ensures signals match TradingView exactly.
+    """
     all_rows = []
     current  = start_ts
     limit    = 1000
 
     while current < end_ts:
         url = (
-            f"https://api.binance.us/api/v3/klines"
+            f"https://api.binance.com/api/v3/klines"
             f"?symbol={symbol}&interval={interval}"
             f"&startTime={current}&limit={limit}"
         )

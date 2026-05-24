@@ -24,6 +24,8 @@ def landing_page(request):
         # Handle both href and src attributes
         html_content = re.sub(r'href="assets/', 'href="/static-landing/', html_content)
         html_content = re.sub(r'src="assets/', 'src="/static-landing/', html_content)
+        html_content = re.sub(r'src="videos/', 'src="/static-landing/videos/', html_content)
+        html_content = re.sub(r'href="videos/', 'href="/static-landing/videos/', html_content)
         
         # Also handle any {% static %} tags if present
         html_content = re.sub(

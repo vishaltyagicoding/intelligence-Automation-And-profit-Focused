@@ -385,11 +385,17 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             )
             
             logger.debug("Kline processed for %s (%s): close=%.2f", self.asset, self.timeframe, close_price)
-            # Live signal detection on every CLOSED candle — fires INSTANTLY
-            # Deduplication is handled in _emit_live_signal via Redis lock + update_or_create.
-            # Celery 5-min task is the reliable FALLBACK in case WebSocket is down.
-            if is_closed:
-                asyncio.ensure_future(self._emit_live_signal())
+            # Live signal detection is now handled EXCLUSIVELY by Celery tasks.
+            # WebSocket only broadcasts price updates - no signal generation.
+            # This ensures all signals come from the same 30-day data window,
+            # preventing duplicate/inconsistent signals.
+            #
+            # Celery task runs every 60 seconds and has the full 30-day context,
+            # so signals will appear within 60 seconds of candle close.
+            # This is acceptable for algo trading (5-minute Celery interval was the original design).
+            #
+            # if is_closed:
+            #     asyncio.ensure_future(self._emit_live_signal())
 
             
         except Exception as exc:

@@ -70,20 +70,21 @@ DAYS_BACK = {
     "2h": 30,  "4h": 30,  "1d": 30,
 }
 
-# Recent window for 60-second incremental updates (hours).
-# Must be large enough for calculator EMA warmup (~25 bars minimum)
-# but small enough to finish quickly.
-# 5M:  4h = 48 candles  (EMA-5 needs 25, we give 48 for safety)
-# 15M: 6h = 24 candles
-# 30M: 12h = 24 candles
-# 1H:  24h = 24 candles
-# 2H:  48h = 24 candles
-# 4H:  96h = 24 candles
-# 1D:  30d = 30 candles
-RECENT_HOURS = {
-    "5m":  4,
-    "15m": 6,  "30m": 12, "1h": 24,
-    "2h":  48, "4h":  96, "1d": 720,
+# Recent window for 60-second incremental updates (DAYS, not hours).
+# CRITICAL: Must use the SAME window as daily task to ensure calculator
+# produces IDENTICAL signals. Using a shorter window causes the calculator
+# to see different swing patterns and emit signals at different positions.
+#
+# All timeframes now use 30 DAYS to match the daily full history task.
+# This ensures perfect consistency across all signal generation paths.
+RECENT_DAYS = {
+    "5m":  30,   # 30 days = 8640 candles (plenty for EMA warmup)
+    "15m": 30,   # 30 days = 2880 candles
+    "30m": 30,   # 30 days = 1440 candles
+    "1h":  30,   # 30 days = 720 candles
+    "2h":  30,   # 30 days = 360 candles
+    "4h":  30,   # 30 days = 180 candles
+    "1d":  30,   # 30 days = 30 candles
 }
 
 
@@ -95,10 +96,10 @@ def _fetch_binance_paginated(symbol: str, interval: str, days_back: int) -> pd.D
     return _fetch_range(symbol, interval, start_ts, end_ts)
 
 
-def _fetch_binance_recent(symbol: str, interval: str, hours_back: int) -> pd.DataFrame:
-    """Fetch only the most recent candles for incremental updates."""
+def _fetch_binance_recent(symbol: str, interval: str, days_back: int) -> pd.DataFrame:
+    """Fetch recent candles for incremental updates (now uses DAYS to match full history)."""
     end_ts   = int(time.time() * 1000)
-    start_ts = int((time.time() - hours_back * 3600) * 1000)
+    start_ts = int((time.time() - days_back * 86400) * 1000)
     return _fetch_range(symbol, interval, start_ts, end_ts)
 
 
@@ -423,12 +424,12 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
     from reversal_zones.reversal_calculator import ReversalZoneCalculator
 
     binance_tf = BINANCE_TF.get(timeframe, "1h")
-    hours_back = RECENT_HOURS.get(timeframe, 48)
+    days_back  = RECENT_DAYS.get(timeframe, 30)
 
     try:
         last_db = _get_last_db_signal(symbol, timeframe)
 
-        df = _fetch_binance_recent(symbol, binance_tf, hours_back)
+        df = _fetch_binance_recent(symbol, binance_tf, days_back)
         if df.empty or len(df) < 20:
             return {"status": "no_data"}
 

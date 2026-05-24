@@ -630,13 +630,16 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
 
             # Use RAW calculator (matches TradingView Pine Script EXACTLY)
             # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
+            #
+            # CRITICAL: confirmBars = 1 adds 1-candle confirmation delay to match TradingView
+            # This prevents premature signals that haven't been confirmed yet
             calculator = ReversalZoneCalculator(
                 preset="Low",
                 calc_mode="Average",
                 avg_len=5,
                 atr_len=5,
                 custom_abs=0.05,
-                confirm_bars=0,
+                confirm_bars=1,  # ← CHANGED from 0 to 1 for confirmation
                 timeframe=self.timeframe
             )
             result = calculator.process_ohlcv_data(df)

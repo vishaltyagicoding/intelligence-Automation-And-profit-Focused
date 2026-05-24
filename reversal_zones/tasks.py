@@ -389,13 +389,16 @@ def calculate_history_for_symbol_timeframe(self, symbol: str, timeframe: str):
 
         # Use RAW calculator (matches TradingView Pine Script EXACTLY)
         # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
+        # 
+        # CRITICAL: confirmBars = 1 adds 1-candle confirmation delay to match TradingView
+        # This prevents premature signals that haven't been confirmed yet
         calculator = ReversalZoneCalculator(
             preset="Low",
             calc_mode="Average",
             avg_len=5,
             atr_len=5,
             custom_abs=0.05,
-            confirm_bars=0,
+            confirm_bars=1,  # ← CHANGED from 0 to 1 for confirmation
             timeframe=timeframe
         )
         result = calculator.process_ohlcv_data(df)
@@ -440,13 +443,16 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
 
         # Use RAW calculator (matches TradingView Pine Script EXACTLY)
         # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
+        #
+        # CRITICAL: confirmBars = 1 adds 1-candle confirmation delay to match TradingView
+        # This prevents premature signals that haven't been confirmed yet
         calculator = ReversalZoneCalculator(
             preset="Low",
             calc_mode="Average",
             avg_len=5,
             atr_len=5,
             custom_abs=0.05,
-            confirm_bars=0,
+            confirm_bars=1,  # ← CHANGED from 0 to 1 for confirmation
             timeframe=timeframe
         )
         result    = calculator.process_ohlcv_data(df)

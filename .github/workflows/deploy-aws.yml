@@ -219,7 +219,9 @@ jobs:
             cd ~/smartrisk
             # Copy landing page assets to nginx container
             sudo docker cp smartriskfx-landing/assets neuraltrade_nginx:/usr/share/nginx/html/landing-assets
-            echo "✅ Landing page assets copied to nginx"
+            # Copy videos folder
+            sudo docker cp smartriskfx-landing/videos neuraltrade_nginx:/usr/share/nginx/html/landing-assets/
+            echo "✅ Landing page assets and videos copied to nginx"
           EOF
 
       - name: 👤 Create superuser

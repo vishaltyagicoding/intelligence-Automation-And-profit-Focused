@@ -427,6 +427,52 @@
         }
     }
 
+
+    // ============================================
+    // VIDEO PLAYER FUNCTIONALITY
+    // ============================================
+    initVideoPlayer();
+
+function initVideoPlayer() {
+    const videoContainer = document.getElementById('videoContainer');
+    const videoOverlay = document.getElementById('videoOverlay');
+    const youtubeVideo = document.getElementById('youtubeVideo');
+
+    if (!videoContainer || !videoOverlay || !youtubeVideo) return;
+
+    let isPlaying = false;
+    let clickCount = 0;
+
+    videoOverlay.addEventListener('click', function() {
+        clickCount++;
+
+        if (clickCount === 1) {
+            // First click - start playing
+            isPlaying = true;
+            videoOverlay.classList.add('hidden');
+            videoContainer.classList.add('playing');
+
+            // Send play command to YouTube iframe
+            youtubeVideo.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+
+        } else if (clickCount === 2) {
+            // Second click - redirect to YouTube with autoplay
+            window.open('https://www.youtube.com/watch?v=xKoD-CWqXdU&autoplay=1', '_blank');
+        }
+    });
+
+    // Also handle clicks on the video container when overlay is hidden
+    videoContainer.addEventListener('click', function(e) {
+        if (isPlaying && clickCount >= 1) {
+            // Increment click count when clicking on playing video
+            clickCount++;
+            if (clickCount >= 3) {
+                window.open('https://www.youtube.com/watch?v=xKoD-CWqXdU&autoplay=1', '_blank');
+            }
+        }
+    });
+}
+
     // ============================================
     // CONSOLE BRANDING
     // ============================================

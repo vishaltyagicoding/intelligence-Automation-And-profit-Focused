@@ -46,9 +46,9 @@ smartriskfx-landing/
 - Subscription: https://smartriskfx.com/subscription
 
 #### Contact Emails (All Clickable)
-- General: mailto:alberttyagi123@gmail.com
-- Support: mailto:alberttyagi123@gmail.com
-- Partners: mailto:alberttyagi123@gmail.com
+- General: mailto:contact@smartriskfx.com
+- Support: mailto:support@smartriskfx.com
+- Partners: mailto:partners@smartriskfx.com
 
 #### CTA Buttons
 - Launch Dashboard

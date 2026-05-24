@@ -48,10 +48,11 @@
                 <a href="#testimonials" class="nav-link">Testimonials</a>
                 <a href="https://smartriskfx.com/learn" class="nav-link" target="_blank">Learn</a>
                 <a href="https://smartriskfx.com/about" class="nav-link" target="_blank">About</a>
+                <a href="#video" class="nav-link">Video</a>
             </div>
 
             <div class="nav-actions">
-                <a href="mailto:alberttyagi123@gmail.com" class="nav-contact-btn" title="Email us at trading@smartriskfx.com">
+                <a href="mailto:trading@smartriskfx.com" class="nav-contact-btn" style="cursor:pointer;position:relative;z-index:100;text-decoration:none;">
                     <i class="fas fa-envelope"></i>
                     <span>Contact</span>
                 </a>
@@ -261,6 +262,109 @@
         </div>
     </section>
 
+    <!-- Video Section -->
+    <section class="video-section" id="video">
+        <div class="section-container">
+            <div class="section-header" data-aos="fade-up">
+                <span class="section-tag">Watch Demo</span>
+                <h2 class="section-title">See SmartRisk in <span class="gradient-text">Action</span></h2>
+                <p class="section-subtitle">Watch how our AI-powered trading signals help traders make smarter decisions in real-time</p>
+            </div>
+
+            <!-- YouTube Channel Card -->
+            <div class="yt-channel-card" data-aos="fade-up" data-aos-delay="100">
+                <div class="yt-channel-banner">
+                    <div class="yt-banner-bg"></div>
+                    <div class="yt-channel-info">
+                        <div class="yt-avatar">
+                            <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" width="48" height="48">
+                                <circle cx="24" cy="24" r="24" fill="url(#avatarGrad)"/>
+                                <path d="M18 16.5L34 24L18 31.5V16.5Z" fill="white"/>
+                                <defs>
+                                    <linearGradient id="avatarGrad" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+                                        <stop stop-color="#00d4ff"/>
+                                        <stop offset="1" stop-color="#7b2fff"/>
+                                    </linearGradient>
+                                </defs>
+                            </svg>
+                        </div>
+                        <div class="yt-channel-meta">
+                            <div class="yt-channel-name-row">
+                                <span class="yt-channel-name">SMARTRISK</span>
+                                <span class="yt-verified-badge" title="Verified Channel">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="8" fill="#00d4ff"/><path d="M5 8.5L7 10.5L11 6" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                </span>
+                            </div>
+                            <span class="yt-channel-handle">@SMARTRISKsmartrisk</span>
+                            <div class="yt-channel-stats">
+                                <span><i class="fab fa-youtube"></i> YouTube Channel</span>
+                                <span class="yt-dot">•</span>
+                                <span>AI Trading Signals &amp; Education</span>
+                            </div>
+                        </div>
+                        <a href="https://www.youtube.com/@SMARTRISKsmartrisk" target="_blank" rel="noopener" class="yt-subscribe-btn">
+                            <i class="fab fa-youtube"></i> Subscribe
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Video Player with YouTube overlay -->
+            <div class="video-wrapper" data-aos="zoom-in" data-aos-delay="200">
+                <div class="video-container" id="videoContainer">
+                    <video id="mainVideo" preload="metadata" playsinline>
+                        <source src="videos/demo.mp4" type="video/mp4">
+                    </video>
+
+                    <!-- Overlay: click container = YouTube, click play btn = play locally -->
+                    <div class="video-overlay" id="videoOverlay">
+                        <!-- YouTube hint bar (top) -->
+                        <div class="yt-hint-bar">
+                            <i class="fab fa-youtube"></i>
+                            <span>Click anywhere to watch on YouTube</span>
+                        </div>
+
+                        <!-- Centre: play button (stops propagation) -->
+                        <button class="yt-play-ring" id="playBtn" aria-label="Play video">
+                            <div class="play-button">
+                                <i class="fas fa-play"></i>
+                            </div>
+                            <span class="play-label">Play Preview</span>
+                        </button>
+
+                        <!-- Bottom bar -->
+                        <div class="yt-overlay-footer">
+                            <span class="video-watch-text"><i class="fab fa-youtube"></i> @SMARTRISKsmartrisk</span>
+                            <a href="https://www.youtube.com/@SMARTRISKsmartrisk" target="_blank" rel="noopener" class="yt-open-link" id="ytOpenLink">
+                                Open Channel <i class="fas fa-external-link-alt"></i>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Pause overlay (shows while playing) -->
+                    <div class="video-playing-bar" id="playingBar">
+                        <button class="pause-btn" id="pauseBtn"><i class="fas fa-pause"></i></button>
+                        <span>Playing preview</span>
+                        <a href="https://www.youtube.com/@SMARTRISKsmartrisk" target="_blank" rel="noopener" class="yt-watch-full">
+                            <i class="fab fa-youtube"></i> Watch Full on YouTube
+                        </a>
+                    </div>
+                </div>
+                <div class="video-glow"></div>
+            </div>
+
+            <!-- CTA below video -->
+            <div class="yt-cta-row" data-aos="fade-up" data-aos-delay="300">
+                <a href="https://www.youtube.com/@SMARTRISKsmartrisk" target="_blank" rel="noopener" class="yt-full-channel-btn">
+                    <i class="fab fa-youtube"></i>
+                    Visit Our Full YouTube Channel
+                    <i class="fas fa-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </section>
+
+
     <!-- Dashboard Preview -->
     <section class="dashboard-preview">
         <div class="section-container">
@@ -389,9 +493,9 @@
     <section class="pricing" id="pricing">
         <div class="section-container">
             <div class="section-header" data-aos="fade-up">
-                <span class="section-tag">Pricing Plans</span>
-                <h2 class="section-title">Choose Your <span class="gradient-text">Plan</span></h2>
-                <p class="section-subtitle">Start free and upgrade as you grow. No credit card required.</p>
+                <span class="section-tag">Free Trial</span>
+                <h2 class="section-title">Start Your <span class="gradient-text">3-Day Free Trial</span></h2>
+                <p class="section-subtitle">Get full access to all features for 3 days. No credit card required.</p>
             </div>
 
             <div class="pricing-grid">
@@ -413,6 +517,45 @@
                         <li class="disabled"><i class="fas fa-times"></i> Signal Alerts (Email)</li>
                     </ul>
                     <a href="https://smartriskfx.com/dashboard" class="pricing-btn btn-outline" target="_blank">Start Free Trial</a>
+                </div>
+
+                <div class="pricing-card featured" data-aos="fade-up" data-aos-delay="200">
+                    <div class="popular-badge">Most Popular</div>
+                    <div class="pricing-header">
+                        <h3>Pro</h3>
+                        <div class="pricing-price">
+                            <span class="trial-badge">3 Days Free Trial</span>
+                        </div>
+                        <p class="pricing-desc">For serious traders</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="fas fa-check"></i> All 4 Crypto Assets</li>
+                        <li><i class="fas fa-check"></i> All 10 Timeframes</li>
+                        <li><i class="fas fa-check"></i> Full Dashboard Access</li>
+                        <li><i class="fas fa-check"></i> Instant Email Alerts</li>
+                        <li><i class="fas fa-check"></i> 5-Month Signal History</li>
+                        <li><i class="fas fa-check"></i> Priority Support</li>
+                    </ul>
+                    <a href="https://smartriskfx.com/subscription" class="pricing-btn btn-primary" target="_blank">Start Free Trial</a>
+                </div>
+
+                <div class="pricing-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="pricing-header">
+                        <h3>Enterprise</h3>
+                        <div class="pricing-price">
+                            <span class="trial-badge">3 Days Free Trial</span>
+                        </div>
+                        <p class="pricing-desc">For trading teams</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="fas fa-check"></i> Everything in Pro</li>
+                        <li><i class="fas fa-check"></i> Unlimited History</li>
+                        <li><i class="fas fa-check"></i> API Access</li>
+                        <li><i class="fas fa-check"></i> Custom Alerts</li>
+                        <li><i class="fas fa-check"></i> Dedicated Manager</li>
+                        <li><i class="fas fa-check"></i> White-label Options</li>
+                    </ul>
+                    <a href="mailto:trading@smartriskfx.com" class="pricing-btn btn-outline">Contact Sales</a>
                 </div>
             </div>
         </div>
@@ -733,5 +876,63 @@
 
     <script src="assets/js/main.js"></script>
     <script src="assets/js/animations.js"></script>
+
+    <script>
+    (function () {
+        var video      = document.getElementById('mainVideo');
+        var overlay    = document.getElementById('videoOverlay');
+        var playBtn    = document.getElementById('playBtn');
+        var pauseBtn   = document.getElementById('pauseBtn');
+        var playingBar = document.getElementById('playingBar');
+        var ytOpenLink = document.getElementById('ytOpenLink');
+        var YT_URL     = 'https://www.youtube.com/@SMARTRISKsmartrisk';
+
+        if (!video || !overlay || !playBtn) return;
+
+        // Play button: play video locally, stop event bubbling
+        playBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            overlay.classList.add('hidden');
+            playingBar.classList.add('visible');
+            video.muted = false;
+            video.play().catch(function () {
+                video.muted = true;
+                video.play();
+            });
+        });
+
+        // Clicking the overlay (outside play btn) opens YouTube
+        overlay.addEventListener('click', function (e) {
+            if (!playBtn.contains(e.target) && (!ytOpenLink || !ytOpenLink.contains(e.target))) {
+                window.open(YT_URL, '_blank', 'noopener');
+            }
+        });
+
+        // Pause button
+        pauseBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            video.pause();
+            playingBar.classList.remove('visible');
+            overlay.classList.remove('hidden');
+        });
+
+        // Video ends
+        video.addEventListener('ended', function () {
+            playingBar.classList.remove('visible');
+            overlay.classList.remove('hidden');
+            video.currentTime = 0;
+        });
+
+        // Click video while playing to pause
+        video.addEventListener('click', function (e) {
+            if (!video.paused) {
+                e.stopPropagation();
+                video.pause();
+                playingBar.classList.remove('visible');
+                overlay.classList.remove('hidden');
+            }
+        });
+    })();
+    </script>
 </body>
-</html>
+</html><!-- placeholder -->

@@ -88,169 +88,98 @@ def _professional_sl_target(
     - Stop Loss SELL: Find previous RED candle where OPEN > current signal OPEN,
                       use that candle's OPEN price as stop loss
     
-    STRICT RISK MANAGEMENT RULES (Production Trading):
-    - Stop Loss: MINIMUM 0.2%, MAXIMUM 0.5% from entry
-    - Target:    MINIMUM 0.4%, MAXIMUM 0.7% from entry
-    - Risk-Reward: 2.5:1 ratio (before applying caps)
+    NEW RISK MANAGEMENT RULES (2:1 Reward-to-Risk Ratio):
+    - Target:    MINIMUM 0.2%, MAXIMUM 0.55% from entry
+    - Stop Loss: HALF of target distance (creates 2:1 reward-to-risk)
     
-    These caps ensure:
-    1. Stop loss never too tight (< 0.2%) - prevents premature stops
-    2. Stop loss never too wide (> 0.5%) - limits maximum loss
-    3. Target never too small (< 0.4%) - ensures minimum profit
-    4. Target never too large (> 0.7%) - realistic profit taking
+    Formula:
+    - BUY:  Target = Entry + X%, Stop Loss = Entry - (X% * 0.5)
+    - SELL: Target = Entry - X%, Stop Loss = Entry + (X% * 0.5)
+    
+    Example (BUY at $50,000):
+    - Target = $50,200 (0.4% above entry)
+    - Stop Loss = $49,900 (0.2% below entry = half of 0.4%)
+    - Reward-to-Risk = 2:1
+    
+    This ensures:
+    1. Target never too small (>= 0.2%) - ensures minimum profit
+    2. Target never too large (<= 0.55%) - realistic profit taking
+    3. Stop loss is always half of target - perfect 2:1 ratio
+    4. Risk is controlled and consistent across all signals
     """
     # ── STRICT RISK MANAGEMENT CONSTANTS ─────────────────────────────────
-    # Stop Loss Constraints
-    MIN_SL_PCT      = 0.002     # MINIMUM 0.2% stop loss (prevent too tight)
-    MAX_SL_PCT      = 0.005     # MAXIMUM 0.5% stop loss (limit max loss)
-    
-    # Target Constraints
-    MIN_TARGET_PCT  = 0.004     # MINIMUM 0.4% target (ensure minimum profit)
-    MAX_TARGET_PCT  = 0.007     # MAXIMUM 0.7% target (realistic profit taking)
+    # Target Constraints (Stop Loss will be calculated as half of target distance)
+    MIN_TARGET_PCT  = 0.002     # MINIMUM 0.2% target (ensure minimum profit)
+    MAX_TARGET_PCT  = 0.0055    # MAXIMUM 0.55% target (realistic profit taking)
     
     # Calculation Parameters
-    RISK_REWARD     = 2.5       # 2.5:1 risk-reward ratio (before applying caps)
-    LOOKBACK        = 50        # max candles to look back
-    DOJI_THRESHOLD  = 0.001     # candle body < 0.1% of price = doji
+    LOOKBACK        = 50        # max candles to look back (not used in new formula)
+    DOJI_THRESHOLD  = 0.001     # candle body < 0.1% of price = doji (not used in new formula)
 
     n           = len(df)
-    look_start  = max(0, bar_index - LOOKBACK)
-    sl_level    = None
     
-    # Use center_price (entry price) as the reference point for comparison
+    # Use center_price (entry price) as the reference point for calculation
     # center_price is the actual signal entry price (high for SELL, low for BUY)
 
     if is_bullish:
-        # ── BUY: Find previous GREEN candle where OPEN < current signal entry ──
-        # Use the OPEN price of that candle as stop loss
-        for i in range(bar_index - 1, look_start - 1, -1):
-            if i < 0 or i >= n:
-                continue
-            o   = float(df['open'].iloc[i])
-            c   = float(df['close'].iloc[i])
-
-            # Must be a GREEN candle (close > open)
-            if c <= o:
-                continue
-
-            body_pct = abs(c - o) / o if o > 0 else 0
-            if body_pct < DOJI_THRESHOLD:
-                continue  # skip doji
-
-            # Check if this candle's OPEN is BELOW current signal entry price
-            if o < center_price:
-                # Found it! Use the OPEN price of this candle as stop loss
-                sl_level = o
-                break
-
-        if sl_level is None:
-            # Fallback: use entry price - 0.3% (middle of min/max range)
-            sl_level = center_price * (1 - 0.003)
-
-        # ── APPLY STRICT STOP LOSS CONSTRAINTS ──────────────────────────
-        # Calculate stop loss distance as percentage
-        sl_distance_pct = (center_price - sl_level) / center_price
+        # ── BUY SIGNAL: Calculate Target First, then Stop Loss = Half of Target Distance ──
         
-        # Enforce MINIMUM 0.2% stop loss (prevent too tight)
-        if sl_distance_pct < MIN_SL_PCT:
-            sl_level = center_price * (1 - MIN_SL_PCT)
-            sl_distance_pct = MIN_SL_PCT
+        # Step 1: Calculate initial target using risk-reward ratio
+        # Start with a base target distance
+        initial_target_pct = 0.004  # Start with 0.4% as base
         
-        # Enforce MAXIMUM 0.5% stop loss (limit max loss)
-        if sl_distance_pct > MAX_SL_PCT:
-            sl_level = center_price * (1 - MAX_SL_PCT)
-            sl_distance_pct = MAX_SL_PCT
+        # Calculate initial target
+        initial_target = center_price * (1 + initial_target_pct)
         
-        stop_loss = sl_level
-
-        # ── CALCULATE TARGET WITH STRICT CONSTRAINTS ─────────────────────
-        # Calculate risk in absolute terms
-        risk = center_price - stop_loss
-        if risk <= 0:
-            risk = center_price * 0.003  # 0.3% fallback
-
-        # Calculate risk-reward target (2.5:1) - this is the PRIMARY target
-        rr_target = center_price + (risk * RISK_REWARD)
+        # Step 2: Apply target constraints (0.2% - 0.55%)
+        target_distance_pct = initial_target_pct
         
-        # Calculate target distance as percentage
-        target_distance_pct = (rr_target - center_price) / center_price
-        
-        # Enforce MINIMUM 0.4% target (ensure minimum profit)
+        # Enforce MINIMUM 0.2% target (ensure minimum profit)
         if target_distance_pct < MIN_TARGET_PCT:
             target_distance_pct = MIN_TARGET_PCT
         
-        # Enforce MAXIMUM 0.7% target (realistic profit taking)
+        # Enforce MAXIMUM 0.55% target (realistic profit taking)
         if target_distance_pct > MAX_TARGET_PCT:
             target_distance_pct = MAX_TARGET_PCT
         
-        # Apply the constrained percentage to get final target
+        # Calculate final target
         target = center_price * (1 + target_distance_pct)
+        
+        # Step 3: Calculate stop loss = half of target distance
+        # Formula: SL = Entry - (Target Distance * 0.5)
+        target_distance = target - center_price
+        sl_distance = target_distance * 0.5
+        stop_loss = center_price - sl_distance
 
     else:
-        # ── SELL: Find previous RED candle where OPEN > current signal entry ──
-        # Use the OPEN price of that candle as stop loss
-        for i in range(bar_index - 1, look_start - 1, -1):
-            if i < 0 or i >= n:
-                continue
-            o    = float(df['open'].iloc[i])
-            c    = float(df['close'].iloc[i])
-
-            # Must be a RED candle (close < open)
-            if c >= o:
-                continue
-
-            body_pct = abs(o - c) / o if o > 0 else 0
-            if body_pct < DOJI_THRESHOLD:
-                continue  # skip doji
-
-            # Check if this candle's OPEN is ABOVE current signal entry price
-            if o > center_price:
-                # Found it! Use the OPEN price of this candle as stop loss
-                sl_level = o
-                break
-
-        if sl_level is None:
-            # Fallback: use entry price + 0.3% (middle of min/max range)
-            sl_level = center_price * (1 + 0.003)
-
-        # ── APPLY STRICT STOP LOSS CONSTRAINTS ──────────────────────────
-        # Calculate stop loss distance as percentage
-        sl_distance_pct = (sl_level - center_price) / center_price
+        # ── SELL SIGNAL: Calculate Target First, then Stop Loss = Half of Target Distance ──
         
-        # Enforce MINIMUM 0.2% stop loss (prevent too tight)
-        if sl_distance_pct < MIN_SL_PCT:
-            sl_level = center_price * (1 + MIN_SL_PCT)
-            sl_distance_pct = MIN_SL_PCT
+        # Step 1: Calculate initial target using risk-reward ratio
+        # Start with a base target distance
+        initial_target_pct = 0.004  # Start with 0.4% as base
         
-        # Enforce MAXIMUM 0.5% stop loss (limit max loss)
-        if sl_distance_pct > MAX_SL_PCT:
-            sl_level = center_price * (1 + MAX_SL_PCT)
-            sl_distance_pct = MAX_SL_PCT
+        # Calculate initial target
+        initial_target = center_price * (1 - initial_target_pct)
         
-        stop_loss = sl_level
-
-        # ── CALCULATE TARGET WITH STRICT CONSTRAINTS ─────────────────────
-        # Calculate risk in absolute terms
-        risk = stop_loss - center_price
-        if risk <= 0:
-            risk = center_price * 0.003  # 0.3% fallback
-
-        # Calculate risk-reward target (2.5:1) - this is the PRIMARY target
-        rr_target = center_price - (risk * RISK_REWARD)
+        # Step 2: Apply target constraints (0.2% - 0.55%)
+        target_distance_pct = initial_target_pct
         
-        # Calculate target distance as percentage
-        target_distance_pct = (center_price - rr_target) / center_price
-        
-        # Enforce MINIMUM 0.4% target (ensure minimum profit)
+        # Enforce MINIMUM 0.2% target (ensure minimum profit)
         if target_distance_pct < MIN_TARGET_PCT:
             target_distance_pct = MIN_TARGET_PCT
         
-        # Enforce MAXIMUM 0.7% target (realistic profit taking)
+        # Enforce MAXIMUM 0.55% target (realistic profit taking)
         if target_distance_pct > MAX_TARGET_PCT:
             target_distance_pct = MAX_TARGET_PCT
         
-        # Apply the constrained percentage to get final target
+        # Calculate final target
         target = center_price * (1 - target_distance_pct)
+        
+        # Step 3: Calculate stop loss = half of target distance
+        # Formula: SL = Entry + (Target Distance * 0.5)
+        target_distance = center_price - target
+        sl_distance = target_distance * 0.5
+        stop_loss = center_price + sl_distance
 
     # Round to 2 decimal places for consistency
     stop_loss = round(stop_loss, 2)

@@ -668,76 +668,40 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             # ══════════════════════════════════════════════════════════════════
             # FIX: Use actual current close price as ENTRY — not the pivot price.
             #
-            # WHY: The reversal calculator sets center_price = the HISTORICAL
-            # pivot high (for SELL) or pivot low (for BUY). The signal is only
-            # CONFIRMED later when the price has moved away from that pivot. So
-            # the history-page "Entry Price" (center_price = pivot) could differ
-            # significantly from what the live chart shows at the signal candle.
-            # This mismatch is especially visible for XAUUSD (PAXGUSDT) where
-            # the pivot-to-confirmation distance can be $50+.
+            # NEW RISK MANAGEMENT (2:1 Reward-to-Risk Ratio):
+            #   Target:    MINIMUM 0.2%, MAXIMUM 0.55% from entry
+            #   Stop Loss: HALF of target distance (creates 2:1 reward-to-risk)
             #
-            # SOLUTION:
-            #   entry = actual close of the CURRENT (confirmation) candle
-            #   SL    = original zone stop_loss (anchored to the pivot structure)
-            #   Target = entry ± risk × 2.5  (recalculated from actual entry)
-            #
-            # STRICT RISK MANAGEMENT (Production Trading):
-            #   Stop Loss: MINIMUM 0.2%, MAXIMUM 0.5% from entry
-            #   Target:    MINIMUM 0.4%, MAXIMUM 0.7% from entry
+            # Formula:
+            #   BUY:  Target = Entry + X%, Stop Loss = Entry - (X% * 0.5)
+            #   SELL: Target = Entry - X%, Stop Loss = Entry + (X% * 0.5)
             # ══════════════════════════════════════════════════════════════════
             actual_close = round(float(df["close"].iloc[-1]), 2)
             is_bull = last_zone["is_bullish"]
-            pivot_price = last_zone["center_price"]
 
-            # Keep the technically-correct SL (based on pivot structure)
-            orig_sl = last_zone.get("stop_loss")
-            if orig_sl is None:
-                # Fallback if explicit SL not set: use outer_top/outer_bottom
-                orig_sl = last_zone["outer_bottom"] if is_bull else last_zone["outer_top"]
-
-            sl_px = float(orig_sl)
-
-            # ── APPLY STRICT STOP LOSS CONSTRAINTS ──────────────────────────
-            # Calculate stop loss distance as percentage
-            sl_distance_pct = abs(actual_close - sl_px) / actual_close
+            # ── CALCULATE TARGET FIRST ─────────────────────────────────────────
+            # Start with base target distance
+            target_distance_pct = 0.004  # 0.4% base
             
-            # Enforce MINIMUM 0.2% stop loss (prevent too tight)
-            MIN_SL_PCT = 0.002
-            if sl_distance_pct < MIN_SL_PCT:
-                sl_px = actual_close * (1 - MIN_SL_PCT) if is_bull else actual_close * (1 + MIN_SL_PCT)
-                sl_distance_pct = MIN_SL_PCT
-            
-            # Enforce MAXIMUM 0.5% stop loss (limit max loss)
-            MAX_SL_PCT = 0.005
-            if sl_distance_pct > MAX_SL_PCT:
-                sl_px = actual_close * (1 - MAX_SL_PCT) if is_bull else actual_close * (1 + MAX_SL_PCT)
-                sl_distance_pct = MAX_SL_PCT
-
-            # ── CALCULATE TARGET WITH STRICT CONSTRAINTS ─────────────────────
-            # Calculate risk in absolute terms
-            risk = abs(actual_close - sl_px)
-            if risk < actual_close * 0.001:        # guard against near-zero risk
-                risk = actual_close * 0.003         # 0.3% fallback
-
-            # Calculate risk-reward target (2.5:1) - this is the PRIMARY target
-            RR = 2.5
-            rr_target = actual_close + (risk * RR) if is_bull else actual_close - (risk * RR)
-            
-            # Calculate target distance as percentage
-            target_distance_pct = abs(rr_target - actual_close) / actual_close
-            
-            # Enforce MINIMUM 0.4% target (ensure minimum profit)
-            MIN_TARGET_PCT = 0.004
+            # Enforce MINIMUM 0.2% target (ensure minimum profit)
+            MIN_TARGET_PCT = 0.002
             if target_distance_pct < MIN_TARGET_PCT:
                 target_distance_pct = MIN_TARGET_PCT
             
-            # Enforce MAXIMUM 0.7% target (realistic profit taking)
-            MAX_TARGET_PCT = 0.007
+            # Enforce MAXIMUM 0.55% target (realistic profit taking)
+            MAX_TARGET_PCT = 0.0055
             if target_distance_pct > MAX_TARGET_PCT:
                 target_distance_pct = MAX_TARGET_PCT
             
-            # Apply the constrained percentage to get final target
-            tgt_px = actual_close * (1 + target_distance_pct) if is_bull else actual_close * (1 - target_distance_pct)
+            # Calculate final target
+            if is_bull:
+                tgt_px = actual_close * (1 + target_distance_pct)
+                target_distance = tgt_px - actual_close
+                sl_px = actual_close - (target_distance * 0.5)
+            else:
+                tgt_px = actual_close * (1 - target_distance_pct)
+                target_distance = actual_close - tgt_px
+                sl_px = actual_close + (target_distance * 0.5)
             
             # Round to 2 decimal places
             sl_px  = round(sl_px, 2)

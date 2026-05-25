@@ -2593,3 +2593,158 @@ button:focus-visible {
         color: black;
     }
 }
+
+/* ============================================
+   CONTACT MODAL — Clean Direct Email
+   ============================================ */
+.contact-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: rgba(4, 7, 20, 0.9);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+.contact-modal-overlay.cm-open {
+    display: -webkit-flex;
+    display: flex;
+}
+
+.contact-modal {
+    background: #0d1530;
+    border: 1px solid rgba(0,212,255,0.15);
+    border-radius: 20px;
+    width: 100%;
+    max-width: 500px;
+    overflow: hidden;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04);
+    animation: cmIn 0.28s cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes cmIn {
+    from { opacity:0; transform:translateY(24px) scale(0.97); }
+    to   { opacity:1; transform:translateY(0) scale(1); }
+}
+
+/* Header */
+.cm-header {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 22px 22px 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: linear-gradient(135deg, rgba(0,212,255,0.05), rgba(123,47,255,0.05));
+}
+.cm-header-icon {
+    width: 42px; height: 42px;
+    border-radius: 11px;
+    background: linear-gradient(135deg, #00d4ff22, #7b2fff22);
+    border: 1px solid rgba(0,212,255,0.2);
+    display: flex; align-items: center; justify-content: center;
+    color: #00d4ff; font-size: 1.1rem; flex-shrink: 0;
+}
+.cm-header h2 { font-size: 1.1rem; font-weight: 700; color: #fff; margin: 0 0 2px; }
+.cm-header p  { font-size: 0.78rem; color: rgba(255,255,255,0.4); margin: 0; }
+.cm-close {
+    margin-left: auto; flex-shrink: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.45); font-size: 0.85rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+}
+.cm-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+/* Body */
+.cm-body { padding: 20px 22px 24px; }
+.cm-intro { font-size: 0.82rem; color: rgba(255,255,255,0.45); margin: 0 0 14px; }
+
+/* Email display */
+.cm-email-display {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(0,212,255,0.07);
+    border: 1px solid rgba(0,212,255,0.18);
+    border-radius: 10px;
+    padding: 11px 14px;
+    margin-bottom: 16px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: #00d4ff;
+}
+.cm-email-display i { opacity: 0.7; flex-shrink: 0; }
+.cm-email-display span { flex: 1; word-break: break-all; }
+.cm-copy-inline {
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(0,212,255,0.12); border: 1px solid rgba(0,212,255,0.25);
+    color: #00d4ff; border-radius: 7px; padding: 5px 10px;
+    font-size: 0.75rem; font-weight: 600; cursor: pointer;
+    white-space: nowrap; transition: all 0.2s; flex-shrink: 0;
+}
+.cm-copy-inline:hover { background: rgba(0,212,255,0.22); color: #fff; }
+
+/* Option cards */
+.cm-options { display: flex; flex-direction: column; gap: 8px; }
+
+.cm-option {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 14px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+}
+.cm-option:hover {
+    background: rgba(255,255,255,0.07);
+    border-color: rgba(0,212,255,0.25);
+    transform: translateX(3px);
+}
+
+.cm-option-icon {
+    width: 44px; height: 44px; border-radius: 11px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+}
+.cm-option-icon.gmail   { background: linear-gradient(135deg, #EA4335, #c62828); }
+.cm-option-icon.outlook { background: linear-gradient(135deg, #0078d4, #005fa3); }
+.cm-option-icon.mailapp { background: linear-gradient(135deg, #00c9a7, #007a64); }
+.cm-option-icon.copyopt { background: linear-gradient(135deg, #7b2fff, #4a00a0); }
+
+.cm-option-text { flex: 1; min-width: 0; }
+.cm-option-text strong { display: block; font-size: 0.9rem; font-weight: 700; color: #fff; margin-bottom: 2px; }
+.cm-option-text span   { font-size: 0.75rem; color: rgba(255,255,255,0.4); }
+
+.cm-option-arrow { color: rgba(255,255,255,0.3); font-size: 0.8rem; flex-shrink: 0; }
+.cm-option:hover .cm-option-arrow { color: #00d4ff; }
+
+.cm-copied-badge {
+    background: #00c9a7; color: #fff;
+    font-size: 0.72rem; font-weight: 700;
+    padding: 3px 9px; border-radius: 20px;
+    flex-shrink: 0;
+}
+
+/* Nav button as button element */
+button.nav-contact-btn {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.15);
+    font-family: inherit;
+}
+button.nav-contact-btn:hover { border-color: rgba(0,212,255,0.4); }
+
+/* Responsive */
+@media (max-width: 480px) {
+    .contact-modal { border-radius: 14px; }
+    .cm-body, .cm-header { padding-left: 16px; padding-right: 16px; }
+    .cm-option-text span { display: none; }
+}

@@ -357,6 +357,7 @@ def get_signal_history(request, symbol):
                 'core_bottom':  core_bot,
                 'label':        rec.label_text,
                 'timestamp':    rec.reversal_time.isoformat(),
+                'status':       rec.status,  # NEW: Include status for history page
             })
 
         return Response({

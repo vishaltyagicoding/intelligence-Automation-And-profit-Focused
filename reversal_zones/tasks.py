@@ -582,3 +582,132 @@ def initialize_reversal_zones():
 @shared_task
 def calculate_reversal_zones_task(symbol, timeframe):
     return calculate_history_for_symbol_timeframe.apply_async(args=[symbol, timeframe])
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TASK 3: Check and update signal statuses (Target Hit / SL Hit)
+# ─────────────────────────────────────────────────────────────────────────────
+@shared_task(bind=True, max_retries=1, default_retry_delay=30)
+def check_signal_statuses():
+    """
+    Check all OPEN signals and update their status to TARGET_HIT or SL_HIT
+    based on price movements since signal generation.
+    
+    Runs every 5 minutes to keep history page status up-to-date.
+    
+    Logic:
+    - For BUY signals: Check if price reached target (above) before stop loss (below)
+    - For SELL signals: Check if price reached target (below) before stop loss (above)
+    - Once status changes from OPEN, it never changes again (permanent record)
+    """
+    from reversal_zones.models import ReversalZone
+    from django.utils import timezone as tz
+    from datetime import timedelta
+    
+    logger.info("🔍 Checking signal statuses...")
+    
+    updated_count = 0
+    checked_count = 0
+    
+    try:
+        # Get all OPEN signals from last 30 days
+        since = tz.now() - timedelta(days=30)
+        open_signals = ReversalZone.objects.filter(
+            status='OPEN',
+            reversal_time__gte=since
+        ).select_related()
+        
+        # Group by symbol for efficient API calls
+        signals_by_symbol = {}
+        for signal in open_signals:
+            if signal.symbol not in signals_by_symbol:
+                signals_by_symbol[signal.symbol] = []
+            signals_by_symbol[signal.symbol].append(signal)
+        
+        # Check each symbol's signals
+        for symbol, signals in signals_by_symbol.items():
+            try:
+                # Fetch recent price data for this symbol
+                # Use 1m timeframe for precise target/SL hit detection
+                df = _fetch_binance_recent(symbol, "1m", days_back=30)
+                
+                if df.empty:
+                    logger.warning(f"No price data for {symbol}, skipping")
+                    continue
+                
+                # Check each signal
+                for signal in signals:
+                    checked_count += 1
+                    
+                    # Get price data after signal time
+                    signal_time = signal.reversal_time
+                    if signal_time.tzinfo is None:
+                        signal_time = pytz.utc.localize(signal_time)
+                    
+                    # Filter candles after signal
+                    future_candles = df[df.index > signal_time]
+                    
+                    if future_candles.empty:
+                        continue
+                    
+                    # Check if target or stop loss was hit
+                    target_hit = False
+                    sl_hit = False
+                    hit_time = None
+                    
+                    if signal.is_bullish:
+                        # BUY signal: target above, stop loss below
+                        for idx, candle in future_candles.iterrows():
+                            # Check if stop loss hit first (price went below SL)
+                            if float(candle['low']) <= float(signal.stop_loss):
+                                sl_hit = True
+                                hit_time = idx
+                                break
+                            # Check if target hit (price went above target)
+                            if float(candle['high']) >= float(signal.target):
+                                target_hit = True
+                                hit_time = idx
+                                break
+                    else:
+                        # SELL signal: target below, stop loss above
+                        for idx, candle in future_candles.iterrows():
+                            # Check if stop loss hit first (price went above SL)
+                            if float(candle['high']) >= float(signal.stop_loss):
+                                sl_hit = True
+                                hit_time = idx
+                                break
+                            # Check if target hit (price went below target)
+                            if float(candle['low']) <= float(signal.target):
+                                target_hit = True
+                                hit_time = idx
+                                break
+                    
+                    # Update status if target or SL was hit
+                    if target_hit:
+                        signal.status = 'TARGET_HIT'
+                        signal.status_updated_at = hit_time
+                        signal.save(update_fields=['status', 'status_updated_at'])
+                        updated_count += 1
+                        logger.info(f"✅ Target Hit: {symbol} {signal.timeframe} {'BUY' if signal.is_bullish else 'SELL'} @ {signal.reversal_time}")
+                    elif sl_hit:
+                        signal.status = 'SL_HIT'
+                        signal.status_updated_at = hit_time
+                        signal.save(update_fields=['status', 'status_updated_at'])
+                        updated_count += 1
+                        logger.info(f"❌ SL Hit: {symbol} {signal.timeframe} {'BUY' if signal.is_bullish else 'SELL'} @ {signal.reversal_time}")
+                
+            except Exception as e:
+                logger.error(f"Error checking {symbol} signals: {e}")
+                continue
+        
+        logger.info(f"✅ Status check complete: {checked_count} checked, {updated_count} updated")
+        return {
+            "status": "ok",
+            "checked": checked_count,
+            "updated": updated_count
+        }
+        
+    except Exception as exc:
+        logger.error(f"❌ Error in check_signal_statuses: {exc}")
+        return {"status": "error", "error": str(exc)}

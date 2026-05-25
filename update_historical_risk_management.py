@@ -52,8 +52,8 @@ def apply_strict_constraints(entry_price: float, stop_loss: float, is_bullish: b
     # ── STRICT RISK MANAGEMENT CONSTANTS ─────────────────────────────────
     MIN_SL_PCT      = 0.002     # MINIMUM 0.2% stop loss
     MAX_SL_PCT      = 0.005     # MAXIMUM 0.5% stop loss
-    MIN_TARGET_PCT  = 0.004     # MINIMUM 0.4% target
-    MAX_TARGET_PCT  = 0.007     # MAXIMUM 0.7% target
+    MIN_TARGET_PCT  = 0.002     # MINIMUM 0.2% target
+    MAX_TARGET_PCT  = 0.0055    # MAXIMUM 0.55% target
     RISK_REWARD     = 2.5       # 2.5:1 risk-reward ratio
     
     if is_bullish:
@@ -80,11 +80,11 @@ def apply_strict_constraints(entry_price: float, stop_loss: float, is_bullish: b
         rr_target = entry_price + (risk * RISK_REWARD)
         target_distance_pct = (rr_target - entry_price) / entry_price
         
-        # Enforce MINIMUM 0.4% target
+        # Enforce MINIMUM 0.2% target
         if target_distance_pct < MIN_TARGET_PCT:
             target_distance_pct = MIN_TARGET_PCT
         
-        # Enforce MAXIMUM 0.7% target
+        # Enforce MAXIMUM 0.55% target
         if target_distance_pct > MAX_TARGET_PCT:
             target_distance_pct = MAX_TARGET_PCT
         
@@ -115,11 +115,11 @@ def apply_strict_constraints(entry_price: float, stop_loss: float, is_bullish: b
         rr_target = entry_price - (risk * RISK_REWARD)
         target_distance_pct = (entry_price - rr_target) / entry_price
         
-        # Enforce MINIMUM 0.4% target
+        # Enforce MINIMUM 0.2% target
         if target_distance_pct < MIN_TARGET_PCT:
             target_distance_pct = MIN_TARGET_PCT
         
-        # Enforce MAXIMUM 0.7% target
+        # Enforce MAXIMUM 0.55% target
         if target_distance_pct > MAX_TARGET_PCT:
             target_distance_pct = MAX_TARGET_PCT
         

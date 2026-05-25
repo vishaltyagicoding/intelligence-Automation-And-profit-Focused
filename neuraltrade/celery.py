@@ -38,6 +38,10 @@ app.conf.beat_schedule = {
         'task': 'users.tasks.check_and_expire_subscriptions',
         'schedule': 60.0,  # Every 1 minute - check and expire subscriptions at exact time
     },
+    'check-signal-statuses': {
+        'task': 'reversal_zones.tasks.check_signal_statuses',
+        'schedule': 300.0,  # Every 5 minutes - check if signals hit target or stop loss
+    },
 }
 
 @app.task(bind=True, ignore_result=True)

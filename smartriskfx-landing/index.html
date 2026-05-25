@@ -49,16 +49,15 @@
                 <a href="https://smartriskfx.com/learn" class="nav-link" target="_blank">Learn</a>
                 <a href="https://smartriskfx.com/about" class="nav-link" target="_blank">About</a>
                 <a href="#video" class="nav-link">Video</a>
-                <a href="https://www.facebook.com/share/v/1EAJvqiaUr/" class="nav-link">Social</a>
             </div>
 
             <div class="nav-actions">
-                <a href="mailto:trading@smartriskfx.com" class="nav-contact-btn" style="cursor:pointer;position:relative;z-index:100;text-decoration:none;">
+                <button type="button" class="nav-contact-btn" id="openContactModal" aria-label="Contact Us">
                     <i class="fas fa-envelope"></i>
                     <span>Contact</span>
-                </a>
-                <a href="https://smartriskfx.com/register" class="nav-cta-btn" target="_blank">
-                    Indicator Free Trial
+                </button>
+                <a href="https://smartriskfx.com/dashboard" class="nav-cta-btn" target="_blank">
+                    Launch Dashboard
                     <i class="fas fa-arrow-right"></i>
                 </a>
                 <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle Menu">
@@ -97,13 +96,13 @@
             </p>
 
             <div class="hero-cta-group" data-aos="fade-up" data-aos-delay="300">
-                <a href="https://smartriskfx.com/register" class="btn-primary" target="_blank">
+                <a href="https://smartriskfx.com/dashboard" class="btn-primary" target="_blank">
                     <i class="fas fa-rocket"></i>
-                    Indicator Free Trial
+                    Launch Dashboard
                 </a>
                 <a href="https://smartriskfx.com/history" class="btn-secondary" target="_blank">
                     <i class="fas fa-chart-line"></i>
-                    Indicator Signal History
+                    View Signal History
                 </a>
             </div>
 
@@ -453,9 +452,9 @@
             </div>
 
             <div class="preview-cta" data-aos="fade-up">
-                <a href="https://smartriskfx.com/register" class="btn-primary btn-large" target="_blank">
+                <a href="https://smartriskfx.com/dashboard" class="btn-primary btn-large" target="_blank">
                     <i class="fas fa-external-link-alt"></i>
-                    Indicator Free Trial
+                    Launch Full Dashboard
                 </a>
             </div>
         </div>
@@ -518,6 +517,45 @@
                         <li class="disabled"><i class="fas fa-times"></i> Signal Alerts (Email)</li>
                     </ul>
                     <a href="https://smartriskfx.com/dashboard" class="pricing-btn btn-outline" target="_blank">Start Free Trial</a>
+                </div>
+
+                <div class="pricing-card featured" data-aos="fade-up" data-aos-delay="200">
+                    <div class="popular-badge">Most Popular</div>
+                    <div class="pricing-header">
+                        <h3>Pro</h3>
+                        <div class="pricing-price">
+                            <span class="trial-badge">3 Days Free Trial</span>
+                        </div>
+                        <p class="pricing-desc">For serious traders</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="fas fa-check"></i> All 4 Crypto Assets</li>
+                        <li><i class="fas fa-check"></i> All 10 Timeframes</li>
+                        <li><i class="fas fa-check"></i> Full Dashboard Access</li>
+                        <li><i class="fas fa-check"></i> Instant Email Alerts</li>
+                        <li><i class="fas fa-check"></i> 5-Month Signal History</li>
+                        <li><i class="fas fa-check"></i> Priority Support</li>
+                    </ul>
+                    <a href="https://smartriskfx.com/subscription" class="pricing-btn btn-primary" target="_blank">Start Free Trial</a>
+                </div>
+
+                <div class="pricing-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="pricing-header">
+                        <h3>Enterprise</h3>
+                        <div class="pricing-price">
+                            <span class="trial-badge">3 Days Free Trial</span>
+                        </div>
+                        <p class="pricing-desc">For trading teams</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="fas fa-check"></i> Everything in Pro</li>
+                        <li><i class="fas fa-check"></i> Unlimited History</li>
+                        <li><i class="fas fa-check"></i> API Access</li>
+                        <li><i class="fas fa-check"></i> Custom Alerts</li>
+                        <li><i class="fas fa-check"></i> Dedicated Manager</li>
+                        <li><i class="fas fa-check"></i> White-label Options</li>
+                    </ul>
+                    <a href="#" class="pricing-btn btn-outline open-contact-modal">Contact Sales</a>
                 </div>
             </div>
         </div>
@@ -724,7 +762,7 @@
                         <i class="fas fa-rocket"></i>
                         Launch Dashboard Now
                     </a>
-                    <a href="mailto:trading@smartriskfx.com" class="btn-secondary btn-large">
+                    <a href="#" class="btn-secondary btn-large open-contact-modal">
                         <i class="fas fa-envelope"></i>
                         Contact Our Team
                     </a>
@@ -735,7 +773,7 @@
                     <span><i class="fas fa-bolt"></i> Instant Access</span>
                 </div>
                 <div class="cta-email">
-                    <a href="mailto:trading@smartriskfx.com" class="email-link">
+                    <a href="#" class="email-link open-contact-modal">
                         <i class="fas fa-envelope"></i>
                         trading@smartriskfx.com
                     </a>
@@ -836,6 +874,93 @@
         <i class="fas fa-arrow-up"></i>
     </button>
 
+
+    <!-- ============================================
+         CONTACT MODAL — Direct email, no fake form
+         ============================================ -->
+    <div class="contact-modal-overlay" id="contactModal" role="dialog" aria-modal="true" aria-labelledby="contactModalTitle">
+        <div class="contact-modal" id="contactModalBox">
+
+            <!-- Header -->
+            <div class="cm-header">
+                <div class="cm-header-icon"><i class="fas fa-headset"></i></div>
+                <div>
+                    <h2 id="contactModalTitle">Contact SmartRisk</h2>
+                    <p>We typically respond within 24 hours</p>
+                </div>
+                <button class="cm-close" id="closeContactModal" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+
+            <!-- Email address display -->
+            <div class="cm-body">
+                <p class="cm-intro">Choose how you want to reach us:</p>
+
+                <div class="cm-email-display">
+                    <i class="fas fa-envelope"></i>
+                    <span>trading@smartriskfx.com</span>
+                    <button type="button" class="cm-copy-inline" id="cmCopyEmail" title="Copy email">
+                        <i class="fas fa-copy"></i>
+                        <span class="cm-copy-label">Copy</span>
+                    </button>
+                </div>
+
+                <!-- 4 action cards -->
+                <div class="cm-options">
+
+                    <a href="https://mail.google.com/mail/?view=cm&fs=1&to=trading%40smartriskfx.com&su=SmartRisk%20FX%20Enquiry"
+                       target="_blank" rel="noopener" class="cm-option">
+                        <div class="cm-option-icon gmail">
+                            <svg viewBox="0 0 24 24" width="26" height="26"><path d="M6 18h2V8.83L12 12l4-3.17V18h2V6h-1.4L12 9.67 7.4 6H6z" fill="white" opacity="0"/><path d="M20 4H4C2.9 4 2 4.9 2 6v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" fill="#fff"/></svg>
+                        </div>
+                        <div class="cm-option-text">
+                            <strong>Open in Gmail</strong>
+                            <span>Opens Gmail in your browser — no app needed</span>
+                        </div>
+                        <i class="fas fa-external-link-alt cm-option-arrow"></i>
+                    </a>
+
+                    <a href="https://outlook.live.com/mail/0/deeplink/compose?to=trading%40smartriskfx.com&subject=SmartRisk%20FX%20Enquiry"
+                       target="_blank" rel="noopener" class="cm-option">
+                        <div class="cm-option-icon outlook">
+                            <svg viewBox="0 0 24 24" width="26" height="26"><path d="M7 4v9l5 3 5-3V4H7zm5 9.5L9 12V6h6v6l-3 1.5z" fill="white" opacity="0"/><rect x="2" y="3" width="20" height="18" rx="2" fill="none"/><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" fill="#fff"/></svg>
+                        </div>
+                        <div class="cm-option-text">
+                            <strong>Open in Outlook</strong>
+                            <span>Opens Outlook Web in your browser — no app needed</span>
+                        </div>
+                        <i class="fas fa-external-link-alt cm-option-arrow"></i>
+                    </a>
+
+                    <a href="mailto:trading@smartriskfx.com?subject=SmartRisk%20FX%20Enquiry"
+                       class="cm-option">
+                        <div class="cm-option-icon mailapp">
+                            <i class="fas fa-envelope" style="font-size:1.3rem;color:#fff;"></i>
+                        </div>
+                        <div class="cm-option-text">
+                            <strong>Open Mail App</strong>
+                            <span>Opens your default email app (Outlook, Apple Mail, etc.)</span>
+                        </div>
+                        <i class="fas fa-arrow-right cm-option-arrow"></i>
+                    </a>
+
+                    <button type="button" class="cm-option cm-option-copy" id="cmCopyFull">
+                        <div class="cm-option-icon copyopt">
+                            <i class="fas fa-copy" style="font-size:1.2rem;color:#fff;"></i>
+                        </div>
+                        <div class="cm-option-text">
+                            <strong>Copy Email Address</strong>
+                            <span>Copy to clipboard and paste in any email app</span>
+                        </div>
+                        <span class="cm-copied-badge" id="cmCopiedBadge" style="display:none">Copied!</span>
+                        <i class="fas fa-copy cm-option-arrow" id="cmCopyIcon"></i>
+                    </button>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+
     <script src="assets/js/main.js"></script>
     <script src="assets/js/animations.js"></script>
 
@@ -896,5 +1021,74 @@
         });
     })();
     </script>
+
+    <!-- Contact Modal Script -->
+    <script>
+    (function () {
+        var EMAIL   = 'trading@smartriskfx.com';
+        var modal   = document.getElementById('contactModal');
+        var opens   = document.querySelectorAll('#openContactModal, .open-contact-modal');
+        var closeBtn= document.getElementById('closeContactModal');
+        var copyFull= document.getElementById('cmCopyFull');
+        var copyInl = document.getElementById('cmCopyEmail');
+        var badge   = document.getElementById('cmCopiedBadge');
+        var copyIco = document.getElementById('cmCopyIcon');
+
+        if (!modal) return;
+
+        function openModal(e) { if (e) e.preventDefault(); modal.classList.add('cm-open'); document.body.style.overflow = 'hidden'; }
+        function closeModal()  { modal.classList.remove('cm-open'); document.body.style.overflow = ''; }
+
+        for (var i = 0; i < opens.length; i++) opens[i].addEventListener('click', openModal);
+        if (closeBtn) closeBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
+        document.addEventListener('keydown', function(e) { if ((e.key==='Escape'||e.keyCode===27) && modal.classList.contains('cm-open')) closeModal(); });
+
+        function doCopy(btn) {
+            var done = false;
+            // 1. Modern Clipboard API
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(EMAIL).then(function(){ showCopied(btn); }).catch(function(){ legacyCopy(btn); });
+                return;
+            }
+            legacyCopy(btn);
+        }
+
+        function legacyCopy(btn) {
+            var done = false;
+            // 2. execCommand
+            try {
+                var t = document.createElement('textarea');
+                t.value = EMAIL; t.style.cssText = 'position:fixed;top:-999px;opacity:0;';
+                document.body.appendChild(t); t.focus(); t.select(); t.setSelectionRange(0,99999);
+                done = document.execCommand('copy');
+                document.body.removeChild(t);
+            } catch(e){}
+            // 3. IE clipboardData
+            if (!done && window.clipboardData) { try { window.clipboardData.setData('Text', EMAIL); done = true; } catch(e){} }
+            // 4. Prompt fallback (100% universal)
+            if (!done) { try { window.prompt('Copy: Ctrl+C / Cmd+C', EMAIL); } catch(e){} return; }
+            showCopied(btn);
+        }
+
+        function showCopied(btn) {
+            if (badge)   { badge.style.display = 'inline-block'; }
+            if (copyIco) { copyIco.className = 'fas fa-check cm-option-arrow'; }
+            // inline copy button
+            var inlIcon = document.querySelector('#cmCopyEmail i');
+            var inlLabel= document.querySelector('#cmCopyEmail .cm-copy-label');
+            if (inlIcon)  inlIcon.className = 'fas fa-check';
+            if (inlLabel) inlLabel.textContent = 'Copied!';
+            setTimeout(function(){
+                if (badge)   badge.style.display = 'none';
+                if (copyIco) copyIco.className = 'fas fa-copy cm-option-arrow';
+                if (inlIcon)  inlIcon.className = 'fas fa-copy';
+                if (inlLabel) inlLabel.textContent = 'Copy';
+            }, 2500);
+        }
+
+        if (copyFull) copyFull.addEventListener('click', function(e){ e.stopPropagation(); doCopy(this); });
+        if (copyInl)  copyInl.addEventListener('click',  function(e){ e.stopPropagation(); doCopy(this); });
+    })();
+    </script>
 </body>
-</html><!-- placeholder -->

@@ -17,6 +17,14 @@ class ReversalZone(models.Model):
     label_text = models.CharField(max_length=10, default='BUY')
     bar_index = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+    
+    # Status tracking fields for history page
+    status = models.CharField(max_length=20, default='OPEN', choices=[
+        ('OPEN', 'Open'),
+        ('TARGET_HIT', 'Target Hit'),
+        ('SL_HIT', 'Stop Loss Hit'),
+    ])
+    status_updated_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'reversal_zones'

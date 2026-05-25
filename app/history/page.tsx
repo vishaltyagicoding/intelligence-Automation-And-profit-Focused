@@ -16,7 +16,7 @@ interface SignalHistory {
   entryPrice: number;
   stopLoss: number | null;
   target: number | null;
-  status: 'OPEN';
+  status: 'OPEN' | 'TARGET_HIT' | 'SL_HIT';
   timeframe: string;
 }
 
@@ -108,7 +108,7 @@ export default function SignalHistoryPage() {
             entryPrice: s.center_price as number,
             stopLoss:   apiSl,
             target:     apiTgt,
-            status:     'OPEN',
+            status:     (s.status as 'OPEN' | 'TARGET_HIT' | 'SL_HIT') || 'OPEN',
           });
         });
       });
@@ -245,6 +245,29 @@ export default function SignalHistoryPage() {
     if (symbolFilter !== 'ALL' && s.symbol !== symbolFilter) return false;
     return true;
   });
+
+  // Helper function to render status badge
+  const renderStatus = (status: 'OPEN' | 'TARGET_HIT' | 'SL_HIT') => {
+    if (status === 'TARGET_HIT') {
+      return (
+        <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-400">
+          Target Hit
+        </span>
+      );
+    } else if (status === 'SL_HIT') {
+      return (
+        <span className="rounded-full bg-rose-500/20 px-3 py-1 text-xs font-semibold text-rose-400">
+          SL Hit
+        </span>
+      );
+    } else {
+      return (
+        <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-400">
+          OPEN
+        </span>
+      );
+    }
+  };
 
   if (loading) {
     return (
@@ -400,7 +423,7 @@ export default function SignalHistoryPage() {
                     <td className="px-6 py-4 text-right text-sm text-rose-400">{fmt(signal.stopLoss)}</td>
                     <td className="px-6 py-4 text-right text-sm text-emerald-400">{fmt(signal.target)}</td>
                     <td className="px-6 py-4 text-center">
-                      <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-400">OPEN</span>
+                      {renderStatus(signal.status)}
                     </td>
                   </tr>
                 ))}

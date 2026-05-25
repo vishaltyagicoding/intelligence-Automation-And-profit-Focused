@@ -189,8 +189,9 @@ export default function ChartComponent({
       timeScale: {
         borderColor: 'rgba(148,163,184,0.2)',
         timeVisible: true, secondsVisible: false,
-        fixLeftEdge: true, fixRightEdge: true,
+        fixLeftEdge: true, fixRightEdge: false,
         lockVisibleTimeRangeOnResize: true,
+        rightOffset: 12,
       },
       handleScroll:  { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
       handleScale:   { axisPressedMouseMove: true, mouseWheel: true, pinch: true },

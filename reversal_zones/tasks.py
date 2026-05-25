@@ -588,7 +588,7 @@ def calculate_reversal_zones_task(symbol, timeframe):
 # ─────────────────────────────────────────────────────────────────────────────
 # TASK 3: Check and update signal statuses (Target Hit / SL Hit)
 # ─────────────────────────────────────────────────────────────────────────────
-@shared_task(bind=True, max_retries=1, default_retry_delay=30)
+@shared_task(max_retries=1, default_retry_delay=30)
 def check_signal_statuses():
     """
     Check all OPEN signals and update their status to TARGET_HIT or SL_HIT

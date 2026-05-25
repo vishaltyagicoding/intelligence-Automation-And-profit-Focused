@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('reversal_zones', '0002_auto_20260524_1200'),  # Update this to match your latest migration
+        ('reversal_zones', '0004_reversalzone_stop_loss_reversalzone_target'),
     ]
 
     operations = [

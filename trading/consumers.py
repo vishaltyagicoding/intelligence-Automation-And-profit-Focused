@@ -561,9 +561,19 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
                         "core_bottom":   zone.get("core_bottom",  0),
                         "is_bullish":    is_bull,
                         "label_text":    label,
-                        "bar_index":     zone.get("bar_index", 0),
+                        # bar_index is intentionally EXCLUDED from defaults.
+                        # update_or_create applies defaults on both INSERT and UPDATE.
+                        # bar_index is a relative position in the current data window —
+                        # it shifts every time the window moves. If we allowed it to be
+                        # updated, every Celery run would silently shift the signal's
+                        # position, causing repainting. On INSERT (created=True) we set
+                        # it separately below so new records still get the initial value.
                     },
                 )
+                if created:
+                    # Only set bar_index on first insert — never update it after that
+                    obj.bar_index = zone.get("bar_index", 0)
+                    obj.save(update_fields=["bar_index"])
 
             action = "💾 Created" if created else "🔄 Updated"
             db_stop_loss = float(obj.stop_loss) if obj.stop_loss else float(obj.outer_bottom if is_bull else obj.outer_top)

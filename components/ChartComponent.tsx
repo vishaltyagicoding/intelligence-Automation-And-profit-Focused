@@ -636,78 +636,119 @@ export default function ChartComponent({
     };
 
     const applySignal = (s: SignalPayload) => {
-      const ivl     = TF_SEC[timeframe];
-      const markers = s.all_zones.map(z => zoneToMarker(z, ivl));
-      const visible = chartStartRef.current > 0
-        ? markers.filter(m => (m.time as number) >= chartStartRef.current)
-        : markers;
-      if (visible.length > 0) {
-        mergeAndFlush(visible);
+      // CRITICAL FIX: only apply the SINGLE newest zone from a live WebSocket signal.
+      // The backend sends all_zones[] containing every zone from the calculator window.
+      // Old zones in that array have bar_index values relative to the CURRENT window,
+      // which shift with every new candle — applying them would cause repainting.
+      // The stable, permanent positions of historical signals come exclusively from
+      // the signal-history DB API (see fetchSignals). We only need the newest zone here.
+      const ivl = TF_SEC[timeframe];
+      if (!s.all_zones || s.all_zones.length === 0) return;
+
+      // The last entry in all_zones is always the freshest signal
+      const newestZone = s.all_zones[s.all_zones.length - 1];
+      const marker = zoneToMarker(newestZone, ivl);
+      const t = marker.time as number;
+
+      // Only add if its candle time is not already locked in markersRef
+      // (DB signals loaded by fetchSignals take priority)
+      if (!markersRef.current.has(t)) {
+        mergeAndFlush([marker]);
+        setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
+      } else {
+        // Signal already present (DB version) — just update the status display
         setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
       }
     };
 
     // ── REST: fetch historical signals ────────────────────────────────────────
+    // FIX: DB signals are the ONLY source of truth for historical positions.
+    // The live calculator runs on a sliding window and WILL shift timestamps
+    // every time new candles arrive — that is the repainting bug.
+    // Solution: use signal-history (DB, immutable) for all past signals.
+    // Use reversal-zones ONLY to pick up the one newest live_pending signal
+    // (a candle that closed after the last Celery task run).
     const fetchSignals = async (chartStart = 0) => {
       if (!seriesRef.current || gone.current) return;
       const ivl = TF_SEC[timeframe];
-      
-      // Don't clear markersRef - signals must persist
-      // markersRef.current.clear();
 
       try {
-        const allRaw: Array<{ is_bullish: boolean; timestamp: string }> = [];
+        // ── STEP 1: DB signals (permanent, never repaint) ──────────────────
+        const dbRaw: Array<{ is_bullish: boolean; timestamp: string }> = [];
         try {
           const r = await fetch(`/api/trading/signal-history/${asset}/?timeframe=${timeframe}`);
-          if (r.ok && !gone.current) { const j = await r.json(); if (j.success) allRaw.push(...(j.signals ?? [])); }
-        } catch { /* optional */ }
-
-        if (gone.current) return;
-
-        let liveStatus: { last_signal: string; tracking: string } | null = null;
-        try {
-          const r = await fetch(`/api/trading/reversal-zones/${asset}/?timeframe=${timeframe}`);
           if (r.ok && !gone.current) {
             const j = await r.json();
-            if (j.success && j.data?.zones?.length > 0) { allRaw.push(...j.data.zones); liveStatus = j.data.status ?? null; }
+            if (j.success) dbRaw.push(...(j.signals ?? []));
           }
         } catch { /* optional */ }
 
         if (gone.current) return;
 
-        const sorted = allRaw.map(z => zoneToMarker(z, ivl)).sort((a, b) => (a.time as number) - (b.time as number));
-        
-        // CRITICAL FIX: NEVER delete or filter signals
-        // All signals from database should be displayed on chart
-        // Database alternation trigger ensures BUY/SELL alternation
+        // Build DB markers and record their candle-aligned local timestamps
+        const dbLocalTimes = new Set<number>();
+        const dbMarkers = dbRaw.map(z => {
+          const m = zoneToMarker(z, ivl);
+          dbLocalTimes.add(m.time as number);
+          return m;
+        }).sort((a, b) => (a.time as number) - (b.time as number));
+
+        // ── STEP 2: reversal-zones — only take source=live_pending entry ───
+        // The backend now returns DB records + at most one live_pending zone
+        // (the most-recent candle not yet saved to DB by the Celery task).
+        let liveStatus: { last_signal: string; tracking: string } | null = null;
+        const pendingRaw: Array<{ is_bullish: boolean; timestamp: string }> = [];
+        try {
+          const r = await fetch(`/api/trading/reversal-zones/${asset}/?timeframe=${timeframe}`);
+          if (r.ok && !gone.current) {
+            const j = await r.json();
+            if (j.success) {
+              liveStatus = j.data?.status ?? null;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const pending = (j.data?.zones ?? []).filter((z: any) => z.source === 'live_pending');
+              pendingRaw.push(...pending);
+            }
+          }
+        } catch { /* optional */ }
+
+        if (gone.current) return;
+
+        // ── STEP 3: Merge — DB signals first, pending only if truly new ────
         const final: SeriesMarker<Time>[] = [];
         const seen = new Set<number>();
 
-        for (const m of sorted) {
+        // Permanent DB signals
+        for (const m of dbMarkers) {
           const t = m.time as number;
-          
-          // Only skip exact duplicates (same timestamp)
           if (seen.has(t)) continue;
-          
-          // Add ALL signals - no deletion, no filtering
           final.push(m);
           seen.add(t);
-          
-          // CRITICAL: Store in persistent storage (survives timeframe changes)
           const persistentKey = `${asset}:${timeframe}:${t}`;
           persistentSignalsRef.current.set(persistentKey, m);
         }
 
-        const visible = chartStart > 0 ? final.filter(m => (m.time as number) >= chartStart) : final;
-        
-        // Merge with existing markers (don't replace)
+        // Live pending (newest unsaved candle) — skip if DB already has it
+        for (const z of pendingRaw) {
+          const m = zoneToMarker(z, ivl);
+          const t = m.time as number;
+          if (seen.has(t) || dbLocalTimes.has(t)) continue;
+          final.push(m);
+          seen.add(t);
+          // Do NOT persist — it will be superseded once Celery saves it to DB
+        }
+
+        const sorted = final.sort((a, b) => (a.time as number) - (b.time as number));
+        const visible = chartStart > 0
+          ? sorted.filter(m => (m.time as number) >= chartStart)
+          : sorted;
+
         for (const m of visible) {
           const t = m.time as number;
           if (!markersRef.current.has(t)) {
             markersRef.current.set(t, m);
           }
         }
-        
+
         flushMarkers(chartStart);
         if (!gone.current && liveStatus) setSignalStatus(liveStatus);
       } catch { /* silent */ }

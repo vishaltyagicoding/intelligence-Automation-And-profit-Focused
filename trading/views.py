@@ -210,44 +210,89 @@ def get_reversal_zones(request, symbol):
                 times.append(df.index[i])
             df = pd.DataFrame(rows, index=times)
 
-        # ── Step 2: Run RAW reversal calculator (matches TradingView EXACTLY) ─
-        # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
-        #
-        # CRITICAL: confirmBars = 1 adds 1-candle confirmation delay to match TradingView
-        # This prevents premature signals that haven't been confirmed yet
+        # ── Step 2: Run calculator ONLY to get current status + detect the
+        # single most-recent signal (the one not yet saved to DB).
+        # We do NOT use the calculator's full zone list for display — those
+        # zones repaint every time the window shifts. Only the DB records
+        # (written once and never changed) are used for historical display.
         calculator = ReversalZoneCalculator(
             preset="Low",
             calc_mode="Average",
             avg_len=5,
             atr_len=5,
             custom_abs=0.05,
-            confirm_bars=1,  # ← CHANGED from 0 to 1 for confirmation
+            confirm_bars=1,
             timeframe=timeframe
         )
         result = calculator.process_ohlcv_data(df)
         live_zones = result['zones']
 
-        # ── Step 3: Format live zones for response ────────────────────────────
-        # IMPORTANT: We ONLY return live signals calculated from current data.
-        # Historical signals are available via the signal-history API.
-        # This prevents bar_index mismatch issues where DB signals have old
-        # bar_index values that don't align with the current chart window.
-        
+        # ── Step 3: Build the all_zones list exclusively from the DB ──────────
+        # DB signals are written ONCE (by the Celery task) and never updated,
+        # so their timestamps are permanently locked to the exact candle where
+        # the signal was first detected. This eliminates repainting entirely.
+        import datetime as _dt
+        from django.utils import timezone as _tz
+
+        since = _tz.now() - _dt.timedelta(days=150)
+        db_records = ReversalZone.objects.filter(
+            symbol=binance_symbol,
+            timeframe=timeframe,
+            reversal_time__gte=since,
+        ).order_by('reversal_time')
+
         all_zones = []
-        for z in live_zones:
-            ts = z.get('timestamp') or z.get('reversal_time')
+        db_timestamps = set()
+
+        for rec in db_records:
+            ts = rec.reversal_time
+            ts_iso = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+            db_timestamps.add(ts_iso)
+
+            is_bull = rec.is_bullish
+            entry   = float(rec.center_price)
+            if rec.stop_loss and rec.target:
+                outer_top_val = float(rec.target    if is_bull else rec.stop_loss)
+                outer_bot_val = float(rec.stop_loss if is_bull else rec.target)
+            else:
+                outer_top_val = float(rec.outer_top)
+                outer_bot_val = float(rec.outer_bottom)
+
             all_zones.append({
-                'bar_index':    z['bar_index'],
-                'center_price': float(z['center_price']),
-                'outer_top':    float(z['outer_top']),
-                'outer_bottom': float(z['outer_bottom']),
-                'core_top':     float(z['core_top']),
-                'core_bottom':  float(z['core_bottom']),
-                'is_bullish':   z['is_bullish'],
-                'label':        z.get('label_text', 'BUY' if z['is_bullish'] else 'SELL'),
-                'timestamp':    ts.isoformat() if hasattr(ts, 'isoformat') else str(ts),
-                'source':       'live',
+                'bar_index':    rec.bar_index,
+                'center_price': entry,
+                'outer_top':    outer_top_val,
+                'outer_bottom': outer_bot_val,
+                'core_top':     float(rec.core_top),
+                'core_bottom':  float(rec.core_bottom),
+                'is_bullish':   is_bull,
+                'label':        rec.label_text,
+                'timestamp':    ts_iso,
+                'source':       'db',
             })
+
+        # ── Step 4: Append the most-recent live signal ONLY if it is genuinely
+        # new (not yet saved to DB). This gives real-time signal display for the
+        # very latest candle without repainting older ones.
+        if live_zones:
+            newest_live = live_zones[-1]
+            nl_ts = newest_live.get('timestamp') or newest_live.get('reversal_time')
+            nl_ts_iso = nl_ts.isoformat() if hasattr(nl_ts, 'isoformat') else str(nl_ts)
+
+            if nl_ts_iso not in db_timestamps:
+                nl_ts_iso_z = nl_ts_iso if ('+' in nl_ts_iso or nl_ts_iso.endswith('Z')) else nl_ts_iso + '+00:00'
+                all_zones.append({
+                    'bar_index':    newest_live['bar_index'],
+                    'center_price': float(newest_live['center_price']),
+                    'outer_top':    float(newest_live['outer_top']),
+                    'outer_bottom': float(newest_live['outer_bottom']),
+                    'core_top':     float(newest_live['core_top']),
+                    'core_bottom':  float(newest_live['core_bottom']),
+                    'is_bullish':   newest_live['is_bullish'],
+                    'label':        newest_live.get('label_text', 'BUY' if newest_live['is_bullish'] else 'SELL'),
+                    'timestamp':    nl_ts_iso_z,
+                    'source':       'live_pending',
+                })
 
         path_data = []
         for seg in result.get('path_segments', []):
@@ -270,7 +315,9 @@ def get_reversal_zones(request, symbol):
             'live_count':    len(all_zones),
         }
 
-        cache.set(cache_key, {'success': True, 'data': data}, timeout=60)
+        # Cache for only 30 seconds so the live_pending signal stays fresh,
+        # but DB signals are stable enough to serve from cache.
+        cache.set(cache_key, {'success': True, 'data': data}, timeout=30)
         return Response({'success': True, 'data': data})
 
     except http_requests.exceptions.Timeout:

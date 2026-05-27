@@ -260,10 +260,18 @@ def _save_zones_to_db(symbol: str, timeframe: str, zones: list) -> int:
                         "core_bottom":  z["core_bottom"],
                         "is_bullish":   is_bull,
                         "label_text":   new_label,
-                        "bar_index":    z.get("bar_index", 0),
+                        # bar_index EXCLUDED from defaults intentionally.
+                        # update_or_create applies defaults on both INSERT *and* UPDATE.
+                        # bar_index is a relative offset in the current data window and
+                        # shifts every time the window grows. Updating it on every Celery
+                        # run would silently repaint historical signal positions.
+                        # It is set once on INSERT (see below) and never touched again.
                     },
                 )
                 if created:
+                    # Set bar_index once on first insert only — never update after
+                    zone_obj.bar_index = z.get("bar_index", 0)
+                    zone_obj.save(update_fields=["bar_index"])
                     saved += 1
                     last_saved_label = new_label
                     logger.info(
@@ -403,9 +411,20 @@ def calculate_history_for_symbol_timeframe(self, symbol: str, timeframe: str):
         )
         result = calculator.process_ohlcv_data(df)
         zones  = result.get("zones", [])
-        saved  = _save_zones_to_db(symbol, timeframe, zones)
 
-        logger.info("✅ Full history done: %s %s — %d zones, %d new saved",
+        # ANTI-REPAINT FIX: daily task must also use _filter_new_only.
+        # Without this filter, the task would call update_or_create on signals
+        # that already exist in DB. Even though bar_index is now excluded from
+        # defaults, the task would still perform unnecessary DB writes and could
+        # theoretically overwrite center_price/outer_top/bottom if the calculator
+        # produces slightly different values on a new window run.
+        # Using _filter_new_only(zones, last_db) ensures we ONLY insert truly new
+        # signals — records already in DB are completely untouched.
+        last_db = _get_last_db_signal(symbol, timeframe)
+        new_zones = _filter_new_only(zones, last_db)
+        saved  = _save_zones_to_db(symbol, timeframe, new_zones)
+
+        logger.info("✅ Full history done: %s %s — %d zones found, %d new saved",
                     symbol, timeframe, len(zones), saved)
         return {"status": "ok", "signals": len(zones), "saved_new": saved}
 

@@ -74,7 +74,7 @@ def save_zones(symbol, timeframe, zones):
             if rt is None: continue
             if rt.tzinfo is None: rt = pytz.utc.localize(rt)
             is_bull = z.get("is_bullish", True)
-            _, created = ReversalZone.objects.update_or_create(
+            obj, created = ReversalZone.objects.update_or_create(
                 symbol=symbol, timeframe=timeframe, reversal_time=rt,
                 defaults={
                     "center_price": z["center_price"],
@@ -84,10 +84,14 @@ def save_zones(symbol, timeframe, zones):
                     "core_bottom":  z["core_bottom"],
                     "is_bullish":   is_bull,
                     "label_text":   "BUY" if is_bull else "SELL",
-                    "bar_index":    z.get("bar_index", 0),
+                    # bar_index excluded — relative window offset, shifts on every run.
+                    # Set once on first insert only (see below).
                 },
             )
-            if created: saved += 1
+            if created:
+                obj.bar_index = z.get("bar_index", 0)
+                obj.save(update_fields=["bar_index"])
+                saved += 1
         except (IntegrityError, Exception) as e:
             if "Consecutive" not in str(e):
                 print(f"    Save error: {e}")

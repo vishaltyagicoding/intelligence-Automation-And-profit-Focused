@@ -406,7 +406,7 @@ def calculate_history_for_symbol_timeframe(self, symbol: str, timeframe: str):
             avg_len=5,
             atr_len=5,
             custom_abs=0.05,
-            confirm_bars=1,  # ← CHANGED from 0 to 1 for confirmation
+            confirm_bars=0,  # Pine Script default: 0 (no extra delay) — matches TradingView exactly
             timeframe=timeframe
         )
         result = calculator.process_ohlcv_data(df)
@@ -471,7 +471,7 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
             avg_len=5,
             atr_len=5,
             custom_abs=0.05,
-            confirm_bars=1,  # ← CHANGED from 0 to 1 for confirmation
+            confirm_bars=0,  # Pine Script default: 0 (no extra delay) — matches TradingView exactly
             timeframe=timeframe
         )
         result    = calculator.process_ohlcv_data(df)

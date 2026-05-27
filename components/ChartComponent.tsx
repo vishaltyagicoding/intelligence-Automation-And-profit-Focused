@@ -650,13 +650,20 @@ export default function ChartComponent({
       const marker = zoneToMarker(newestZone, ivl);
       const t = marker.time as number;
 
-      // Only add if its candle time is not already locked in markersRef
-      // (DB signals loaded by fetchSignals take priority)
-      if (!markersRef.current.has(t)) {
+      // Only add if:
+      // 1. Candle time not already locked in markersRef (DB signals take priority)
+      // 2. Signal ALTERNATES with the last marker already on the chart
+      //    (prevents WebSocket BUY→BUY or SELL→SELL if consumer fires twice)
+      const existingMarkers = [...markersRef.current.values()]
+        .sort((a, b) => (a.time as number) - (b.time as number));
+      const lastExisting = existingMarkers[existingMarkers.length - 1];
+      const typeAlternates = !lastExisting || (lastExisting.shape !== marker.shape);
+
+      if (!markersRef.current.has(t) && typeAlternates) {
         mergeAndFlush([marker]);
         setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
       } else {
-        // Signal already present (DB version) — just update the status display
+        // Signal already present or same type as last — just update status display
         setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
       }
     };
@@ -716,25 +723,32 @@ export default function ChartComponent({
         // ── STEP 3: Merge — DB signals first, pending only if truly new ────
         const final: SeriesMarker<Time>[] = [];
         const seen = new Set<number>();
+        let lastSignalShape: string | null = null; // track last marker type for alternation
 
-        // Permanent DB signals
+        // Permanent DB signals — these are already alternation-enforced by DB
         for (const m of dbMarkers) {
           const t = m.time as number;
           if (seen.has(t)) continue;
           final.push(m);
           seen.add(t);
+          lastSignalShape = m.shape as string; // track for alternation check below
           const persistentKey = `${asset}:${timeframe}:${t}`;
           persistentSignalsRef.current.set(persistentKey, m);
         }
 
-        // Live pending (newest unsaved candle) — skip if DB already has it
+        // Live pending (newest unsaved candle) — ONLY if new timestamp AND alternates
+        // FIX: Without this alternation check, live_pending can be BUY when last DB
+        // signal was also BUY, creating consecutive BUY→BUY on the chart.
         for (const z of pendingRaw) {
           const m = zoneToMarker(z, ivl);
           const t = m.time as number;
           if (seen.has(t) || dbLocalTimes.has(t)) continue;
+          // Alternation check: pending must be opposite type to last DB signal
+          const pendingShape = m.shape as string;
+          if (lastSignalShape !== null && pendingShape === lastSignalShape) continue;
           final.push(m);
           seen.add(t);
-          // Do NOT persist — it will be superseded once Celery saves it to DB
+          // Do NOT persist — will be superseded once Celery saves it to DB
         }
 
         const sorted = final.sort((a, b) => (a.time as number) - (b.time as number));

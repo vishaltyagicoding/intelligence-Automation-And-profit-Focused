@@ -189,14 +189,24 @@ def _professional_sl_target(
 
 
 def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
-    """Average True Range."""
+    """
+    Average True Range — Wilder RMA, exactly matching Pine Script ta.atr().
+
+    Pine uses Wilder's smoothing (RMA): alpha = 1/length
+    Python ewm(span=length) uses EMA: alpha = 2/(length+1)
+    These produce different values and would cause signal timing mismatches.
+
+    Wilder RMA formula: ATR[i] = ATR[i-1] * (length-1)/length + TR[i] * (1/length)
+    Equivalent to:      ATR[i] = alpha * TR[i] + (1-alpha) * ATR[i-1]  where alpha = 1/length
+    """
     prev_close = close.shift(1)
     tr = pd.concat([
         high - low,
         (high - prev_close).abs(),
-        (low - prev_close).abs(),
+        (low  - prev_close).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(span=length, adjust=False).mean()
+    # Wilder RMA: alpha = 1/length (NOT EMA which uses 2/(length+1))
+    return tr.ewm(alpha=1.0 / length, adjust=False).mean()
 
 
 class ReversalZoneCalculator:
@@ -398,6 +408,20 @@ class ReversalZoneCalculator:
                     self._run_high_raw = hir
                     self._run_high_bar = actual_bar
         
+        # ── FINAL ALTERNATION PASS ────────────────────────────────────────────
+        # Belt-and-suspenders: even if _emit_reversal's safety check somehow
+        # allowed two consecutive same-type signals, this pass removes them
+        # before any output leaves the calculator.
+        # This guarantees the zones list is ALWAYS strictly alternating.
+        strictly_alternating: list = []
+        for rev in self.reversals:
+            if strictly_alternating and strictly_alternating[-1].is_bullish == rev.is_bullish:
+                # Replace the earlier duplicate with the later one (more recent is better)
+                strictly_alternating[-1] = rev
+            else:
+                strictly_alternating.append(rev)
+        self.reversals = strictly_alternating
+
         # ── Build output with PROFESSIONAL stop loss and target ──────────────
         # Replace the old tiny outer_half formula with swing-structure SL/Target.
         # outer_top  = higher price level  (target for BUY,  stop loss for SELL)

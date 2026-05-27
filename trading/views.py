@@ -221,7 +221,7 @@ def get_reversal_zones(request, symbol):
             avg_len=5,
             atr_len=5,
             custom_abs=0.05,
-            confirm_bars=1,
+            confirm_bars=0,  # Pine Script default: 0 (no extra delay) — matches TradingView exactly,
             timeframe=timeframe
         )
         result = calculator.process_ohlcv_data(df)
@@ -272,14 +272,32 @@ def get_reversal_zones(request, symbol):
             })
 
         # ── Step 4: Append the most-recent live signal ONLY if it is genuinely
-        # new (not yet saved to DB). This gives real-time signal display for the
-        # very latest candle without repainting older ones.
+        # new (not yet saved to DB) AND alternates correctly with the last DB signal.
+        #
+        # ANTI-CONSECUTIVE BUG FIX:
+        # Without the alternation check here, the live_pending zone could be the
+        # SAME type as the last DB signal (e.g. DB last = BUY, live_pending = BUY).
+        # This would render consecutive BUY→BUY on the chart even though the DB
+        # alternation is correct. The live calculator sometimes fires the same type
+        # again on the very latest candle before the Celery task has saved a
+        # balancing SELL in between.
         if live_zones:
             newest_live = live_zones[-1]
             nl_ts = newest_live.get('timestamp') or newest_live.get('reversal_time')
             nl_ts_iso = nl_ts.isoformat() if hasattr(nl_ts, 'isoformat') else str(nl_ts)
+            nl_is_bull = newest_live['is_bullish']
+            nl_label   = 'BUY' if nl_is_bull else 'SELL'
 
-            if nl_ts_iso not in db_timestamps:
+            # Get last DB signal type for alternation check
+            last_db_label = all_zones[-1]['label'] if all_zones else None
+
+            # Accept live_pending ONLY if:
+            # 1. Its timestamp is not already in DB (genuinely new candle)
+            # 2. It ALTERNATES with the last DB signal (BUY after SELL, SELL after BUY)
+            ts_is_new      = nl_ts_iso not in db_timestamps
+            type_alternates = (last_db_label is None) or (last_db_label != nl_label)
+
+            if ts_is_new and type_alternates:
                 nl_ts_iso_z = nl_ts_iso if ('+' in nl_ts_iso or nl_ts_iso.endswith('Z')) else nl_ts_iso + '+00:00'
                 all_zones.append({
                     'bar_index':    newest_live['bar_index'],
@@ -288,8 +306,8 @@ def get_reversal_zones(request, symbol):
                     'outer_bottom': float(newest_live['outer_bottom']),
                     'core_top':     float(newest_live['core_top']),
                     'core_bottom':  float(newest_live['core_bottom']),
-                    'is_bullish':   newest_live['is_bullish'],
-                    'label':        newest_live.get('label_text', 'BUY' if newest_live['is_bullish'] else 'SELL'),
+                    'is_bullish':   nl_is_bull,
+                    'label':        nl_label,
                     'timestamp':    nl_ts_iso_z,
                     'source':       'live_pending',
                 })

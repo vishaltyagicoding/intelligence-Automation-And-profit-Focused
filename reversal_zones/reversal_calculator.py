@@ -318,7 +318,14 @@ class ReversalZoneCalculator:
         self._run_low_bar  = -1
         self._swing_dir = 1
         
-        n = len(df)
+        # ── CRITICAL: Exclude the last (open/live) candle ─────────────────
+        # Binance klines API always returns the current OPEN candle as the
+        # last row. Its high/low are NOT final — they change every tick.
+        # Pine Script only fires pivotReady on CLOSED bars. If we process
+        # the open candle, we generate phantom signals that TradingView
+        # never confirms, causing BUY/SELL arrows to appear at wrong times.
+        # Fix: use len(df) - 1 so the loop never touches the last row.
+        n = len(df) - 1   # skip last (open) candle — only process closed bars
         for i in range(n):
             hi  = hi_ref.iloc[i]
             lo  = lo_ref.iloc[i]

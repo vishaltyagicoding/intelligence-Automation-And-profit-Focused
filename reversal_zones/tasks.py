@@ -409,6 +409,10 @@ def calculate_history_for_symbol_timeframe(self, symbol: str, timeframe: str):
             confirm_bars=0,  # Pine Script default: 0 (no extra delay) — matches TradingView exactly
             timeframe=timeframe
         )
+        # Drop last (open/live) candle — only process closed bars, matching Pine
+        if len(df) > 1:
+            df = df.iloc[:-1]
+
         result = calculator.process_ohlcv_data(df)
         zones  = result.get("zones", [])
 
@@ -474,6 +478,10 @@ def update_recent_signals_for_symbol_timeframe(self, symbol: str, timeframe: str
             confirm_bars=0,  # Pine Script default: 0 (no extra delay) — matches TradingView exactly
             timeframe=timeframe
         )
+        # Drop last (open/live) candle — only process closed bars, matching Pine
+        if len(df) > 1:
+            df = df.iloc[:-1]
+
         result    = calculator.process_ohlcv_data(df)
         all_zones = result.get("zones", [])
 

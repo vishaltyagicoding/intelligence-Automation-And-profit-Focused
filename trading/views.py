@@ -210,7 +210,14 @@ def get_reversal_zones(request, symbol):
                 times.append(df.index[i])
             df = pd.DataFrame(rows, index=times)
 
-        # ── Step 2: Run calculator ONLY to get current status + detect the
+        # ── Step 2: Drop the last (open) candle before running calculator ──
+        # Binance always returns the current open candle as the last row.
+        # Its high/low are incomplete (still changing every tick).
+        # Pine Script only confirms pivots on CLOSED bars — we must match that.
+        if len(df) > 1:
+            df = df.iloc[:-1]   # remove last open candle
+
+        # ── Step 3: Run calculator ONLY to get current status + detect the
         # single most-recent signal (the one not yet saved to DB).
         # We do NOT use the calculator's full zone list for display — those
         # zones repaint every time the window shifts. Only the DB records

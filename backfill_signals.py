@@ -123,6 +123,10 @@ for symbol in SYMBOLS:
                 confirm_bars=0,  # Pine Script default: 0 (no extra delay) — matches TradingView exactly
                 timeframe=tf
             )
+            # Drop last (open/live) candle — only process closed bars
+            if len(df) > 1:
+                df = df.iloc[:-1]
+
             result = calculator.process_ohlcv_data(df)
             zones = result.get("zones", [])
             saved = save_zones(symbol, tf, zones)

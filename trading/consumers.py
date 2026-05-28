@@ -638,6 +638,12 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
             if len(df) < 10:
                 return
 
+            # Drop last row: Redis may include the current open candle.
+            # Pine Script only fires pivots on CLOSED bars. This ensures
+            # our signals match TradingView exactly (no phantom signals).
+            if len(df) > 1:
+                df = df.iloc[:-1]
+
             # Use RAW calculator (matches TradingView Pine Script EXACTLY)
             # NO additional filters (ADX, RSI, time gaps) - just pure swing tracking
             #

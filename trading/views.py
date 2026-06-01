@@ -265,9 +265,15 @@ def get_reversal_zones(request, symbol):
                 outer_top_val = float(rec.outer_top)
                 outer_bot_val = float(rec.outer_bottom)
 
+            # Explicit stop_loss / target fields for frontend SL/Target display
+            explicit_sl  = float(rec.stop_loss) if rec.stop_loss else outer_bot_val if is_bull else outer_top_val
+            explicit_tgt = float(rec.target)    if rec.target    else outer_top_val if is_bull else outer_bot_val
+
             all_zones.append({
                 'bar_index':    rec.bar_index,
                 'center_price': entry,
+                'stop_loss':    round(explicit_sl,  2),
+                'target':       round(explicit_tgt, 2),
                 'outer_top':    outer_top_val,
                 'outer_bottom': outer_bot_val,
                 'core_top':     float(rec.core_top),
@@ -329,26 +335,13 @@ def get_reversal_zones(request, symbol):
                 c_low  = newest_live.get('confirm_low')
                 entry  = float(newest_live['center_price'])
 
-                if c_high is not None and c_low is not None:
-                    if nl_is_bull:
-                        nl_sl   = float(c_low)
-                        nl_risk = abs(entry - nl_sl)
-                        nl_tgt  = entry + 2.0 * nl_risk
-                    else:
-                        nl_sl   = float(c_high)
-                        nl_risk = abs(nl_sl - entry)
-                        nl_tgt  = entry - 2.0 * nl_risk
-                    # Safety guards
-                    if nl_is_bull:
-                        nl_sl  = min(nl_sl,  entry * 0.9999)
-                        nl_tgt = max(nl_tgt, entry * 1.0001)
-                    else:
-                        nl_sl  = max(nl_sl,  entry * 1.0001)
-                        nl_tgt = min(nl_tgt, entry * 0.9999)
-                else:
-                    # Fallback to calculator-provided SL/Target
-                    nl_sl  = float(newest_live.get('stop_loss')  or newest_live['outer_bottom'])
-                    nl_tgt = float(newest_live.get('target')     or newest_live['outer_top'])
+                # Use calculator-provided ATR-based SL/Target (already computed correctly)
+                # These are already set using 1.5×ATR / 3.0×ATR professional logic
+                nl_sl  = float(newest_live.get('stop_loss')  or newest_live['outer_bottom'])
+                nl_tgt = float(newest_live.get('target')     or newest_live['outer_top'])
+
+                if True:  # placeholder for structure consistency
+                    pass
 
                 all_zones.append({
                     'bar_index':    newest_live['bar_index'],

@@ -446,28 +446,47 @@ class ReversalZoneCalculator:
             bar_idx = min(max(r.bar_index, 0), n_df - 1)
             entry   = r.price
 
-            # ── SL and Target: NEW rules (per-signal, from the signal bar) ────
-            # BUY:  SL = low  of signal bar; Target = Entry + 2×risk (1:2 RR)
-            # SELL: SL = high of signal bar; Target = Entry − 2×risk (1:2 RR)
-            sig_high = float(df['high'].iloc[bar_idx])
-            sig_low  = float(df['low'].iloc[bar_idx])
+            # ── Professional SL and Target — ATR-based (volatility-adaptive) ──
+            #
+            # Using ATR(14) for SL/Target gives realistic distances based on
+            # actual market volatility, not arbitrary fixed amounts.
+            #
+            # Logic (30-year professional standard):
+            #   SL   = 1.5 × ATR from entry  (enough room for normal noise)
+            #   Target = 3.0 × ATR from entry (2:1 reward-to-risk ratio)
+            #
+            # For BTC 5M with ATR ~$150:  SL = $225,  Target = $450
+            # For BTC 1H with ATR ~$400:  SL = $600,  Target = $1200
+            # For ETH with ATR ~$8:        SL = $12,   Target = $24
+            # This scales correctly across all assets and timeframes.
+            #
+            # Minimum floor: 0.3% of entry price (prevents near-zero SL on
+            # very stable low-volatility assets or low-ATR periods).
+
+            # Use ATR at the signal bar; fallback to 0.5% of price
+            atr_at_bar = float(self._atr_series.iloc[bar_idx])                 if bar_idx < len(self._atr_series)                    and not pd.isna(self._atr_series.iloc[bar_idx])                 else abs(entry) * 0.005
+
+            # Apply minimum floor: at least 0.3% of entry
+            min_distance = abs(entry) * 0.003
+            atr_distance = max(atr_at_bar, min_distance)
+
+            sl_distance  = 1.5 * atr_distance   # 1.5 × ATR
+            tgt_distance = 3.0 * atr_distance   # 3.0 × ATR  (2:1 RR)
 
             if r.is_bullish:
-                stop_loss = sig_low
-                risk      = abs(entry - stop_loss)
-                target    = entry + 2.0 * risk
+                stop_loss = entry - sl_distance
+                target    = entry + tgt_distance
             else:
-                stop_loss = sig_high
-                risk      = abs(stop_loss - entry)
-                target    = entry - 2.0 * risk
+                stop_loss = entry + sl_distance
+                target    = entry - tgt_distance
 
-            # Safety guards: SL and Target must be on correct side
+            # Safety guards: ensure SL and Target are on correct side
             if r.is_bullish:
-                stop_loss = min(stop_loss, entry * 0.9999)
-                target    = max(target,    entry * 1.0001)
+                stop_loss = min(stop_loss, entry * 0.9990)
+                target    = max(target,    entry * 1.0010)
             else:
-                stop_loss = max(stop_loss, entry * 1.0001)
-                target    = min(target,    entry * 0.9999)
+                stop_loss = max(stop_loss, entry * 1.0010)
+                target    = min(target,    entry * 0.9990)
 
             stop_loss = round(stop_loss, 8)
             target    = round(target,    8)

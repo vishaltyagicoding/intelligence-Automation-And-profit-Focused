@@ -280,19 +280,13 @@ export default function ChartComponent({
     let   historyLoaded   = false;
     const gone            = { current: false };
 
-    // ── flushMarkers: render BUY/SELL + SL/Target + Hit markers together ───────
-    // Combines three marker collections into one setMarkers() call:
-    //  1. markersRef       — BUY/SELL signal arrows (one per candle, deduped)
-    //  2. slTargetMarkersRef — SL and Target labels on each signal candle
-    //  3. hitMarkersRef    — "SL HIT" / "TARGET HIT" labels when price is reached
+    // ── flushMarkers: render BUY/SELL signal arrows only ────────────────────
+    // Only BUY/SELL arrows go into setMarkers().
+    // SL and Target are shown as createPriceLine() — exact horizontal price levels.
     const flushMarkers = (minTime = chartStartRef.current) => {
       if (!seriesRef.current) return;
 
-      const signalMarkers  = [...markersRef.current.values()];
-      const slTgtMarkers   = [...slTargetMarkersRef.current.values()].flat();
-      const hitMarkers     = [...hitMarkersRef.current.values()];
-
-      const all = [...signalMarkers, ...slTgtMarkers, ...hitMarkers];
+      const all = [...markersRef.current.values()];
       const vis = minTime > 0 ? all.filter(m => (m.time as number) >= minTime) : all;
 
       try {
@@ -301,105 +295,67 @@ export default function ChartComponent({
         );
       } catch { /* chart resetting */ }
 
-      // Remove full-width price lines (old approach — replaced by per-candle markers)
+      // After rendering signal arrows, draw SL/Target price lines at exact levels
+      renderSLTargetLines();
+    };
+
+    // ── renderSLTargetLines: draw SL + Target as horizontal price lines ───────
+    // createPriceLine() places a label at the EXACT price level on the right axis,
+    // with a horizontal dashed line across the chart — this is the correct way to
+    // show SL and Target in lightweight-charts. The label appears right on the
+    // price axis at the exact SL or Target price.
+    //
+    // We show lines for ALL active signals (not just the latest) so users can
+    // clearly see each signal's SL and Target levels on the chart.
+    const renderSLTargetLines = () => {
+      if (!seriesRef.current) return;
+
+      // Remove all old SL/Target price lines first
       for (const pl of activePriceLines.current) {
         try { seriesRef.current.removePriceLine(pl); } catch { /* ignore */ }
       }
       activePriceLines.current = [];
-    };
 
-    // ── buildSLTargetMarkers: create SL + Target labels for one signal ───────
-    // Returns two SeriesMarker entries to be stored in slTargetMarkersRef.
-    //
-    // Visual layout:
-    //   BUY signal  → SL label BELOW candle (red circle),  Target ABOVE (green circle)
-    //   SELL signal → SL label ABOVE candle (red circle),  Target BELOW (green circle)
-    //
-    // "circle" shape is used so SL/Target don't visually clash with the
-    // arrowUp/arrowDown shapes used for BUY/SELL signals.
-    const buildSLTargetMarkers = (
-      candleTime: number,
-      isBullish: boolean,
-      sl: number,
-      target: number,
-    ): SeriesMarker<Time>[] => {
-      const t = candleTime as Time;
-      if (isBullish) {
-        return [
-          // SL below the candle (red circle)
-          {
-            time:     t,
-            position: 'belowBar',
-            color:    '#ef4444',
-            shape:    'circle',
-            text:     `SL ${sl.toFixed(2)}`,
-            size:     1,
-          },
-          // Target above the candle (green circle)
-          {
-            time:     t,
-            position: 'aboveBar',
-            color:    '#10b981',
-            shape:    'circle',
-            text:     `T ${target.toFixed(2)}`,
-            size:     1,
-          },
-        ];
-      } else {
-        return [
-          // SL above the candle (red circle)
-          {
-            time:     t,
-            position: 'aboveBar',
-            color:    '#ef4444',
-            shape:    'circle',
-            text:     `SL ${sl.toFixed(2)}`,
-            size:     1,
-          },
-          // Target below the candle (green circle)
-          {
-            time:     t,
-            position: 'belowBar',
-            color:    '#10b981',
-            shape:    'circle',
-            text:     `T ${target.toFixed(2)}`,
-            size:     1,
-          },
-        ];
-      }
-    };
+      if (slTargetMapRef.current.size === 0) return;
 
-    // ── checkHits: detect if price has reached SL or Target ──────────────────
-    // Called on every kline tick. Adds a hit marker on the candle where price
-    // first touches the SL or Target level of an active signal.
-    const checkHits = (currentHigh: number, currentLow: number, currentTime: number) => {
-      for (const [sigTime, { sl, target, isBullish }] of slTargetMapRef.current.entries()) {
-        // Skip if this signal already has a hit marker
-        if (hitMarkersRef.current.has(sigTime)) continue;
-
-        const tHit = isBullish
-          ? currentHigh >= target   // BUY: target hit when price rises to target
-          : currentLow  <= target;  // SELL: target hit when price falls to target
-
-        const slHit = isBullish
-          ? currentLow  <= sl       // BUY: SL hit when price falls to SL
-          : currentHigh >= sl;      // SELL: SL hit when price rises to SL
-
-        if (tHit || slHit) {
-          const hitTime = currentTime as Time;
-          const isTargetHit = tHit && !slHit; // if both, SL takes priority
-          hitMarkersRef.current.set(sigTime, {
-            time:     hitTime,
-            position: isTargetHit ? (isBullish ? 'aboveBar' : 'belowBar')
-                                  : (isBullish ? 'belowBar' : 'aboveBar'),
-            color:    isTargetHit ? '#10b981' : '#ef4444',
-            shape:    'square',
-            text:     isTargetHit ? '✓ TARGET HIT' : '✗ SL HIT',
-            size:     1,
+      // Draw SL + Target lines for every signal in the map
+      for (const { sl, target } of slTargetMapRef.current.values()) {
+        try {
+          // Stop Loss line — red dashed horizontal line at exact SL price
+          const slLine = seriesRef.current.createPriceLine({
+            price:            sl,
+            color:            '#ef4444',
+            lineWidth:        1,
+            lineStyle:        2,          // LineStyle.Dashed = 2
+            axisLabelVisible: true,
+            title:            `SL  ${sl.toFixed(2)}`,
           });
-        }
+          activePriceLines.current.push(slLine);
+
+          // Target line — green dashed horizontal line at exact Target price
+          const tgtLine = seriesRef.current.createPriceLine({
+            price:            target,
+            color:            '#10b981',
+            lineWidth:        1,
+            lineStyle:        2,
+            axisLabelVisible: true,
+            title:            `Target  ${target.toFixed(2)}`,
+          });
+          activePriceLines.current.push(tgtLine);
+        } catch { /* chart may be resetting */ }
       }
     };
+
+    // ── buildSLTargetMarkers: no-op stub (kept for call-site compatibility) ──
+    // SL/Target are now shown as price lines (renderSLTargetLines), not markers.
+    // This stub prevents call-site errors while the slTargetMapRef is still
+    // populated for price line rendering.
+    const buildSLTargetMarkers = (
+      _candleTime: number,
+      _isBullish: boolean,
+      _sl: number,
+      _target: number,
+    ): SeriesMarker<Time>[] => [];  // returns empty — price lines handle display
 
     // ── Apply one Binance kline tick to the chart ─────────────────────────────
     const applyKline = (k: BinanceKlineMsg['k']) => {
@@ -422,15 +378,6 @@ export default function ChartComponent({
       onPriceUpdate?.(asset, close);
       try { seriesRef.current?.update(candle); } catch { /* ignore */ }
 
-      // Check if current price has hit any signal's SL or Target
-      if (slTargetMapRef.current.size > 0) {
-        const prevHitCount = hitMarkersRef.current.size;
-        checkHits(candle.high, candle.low, start as number);
-        if (hitMarkersRef.current.size > prevHitCount) {
-          // New hit detected — refresh markers to show hit label
-          flushMarkers();
-        }
-      }
     };
 
     // ════════════════════════════════════════════════════════════════════════

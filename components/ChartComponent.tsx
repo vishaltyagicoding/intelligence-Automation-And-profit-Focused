@@ -137,8 +137,14 @@ export default function ChartComponent({
   const persistentSignalsRef = useRef<Map<string, SeriesMarker<Time>>>(new Map());
   // SL and Target price lines: keyed by candle time → {sl, target, isBullish}
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // slTargetMarkersRef: stores SL + Target text markers per signal candle time
+  // Kept separate from markersRef so BUY/SELL deduplication is never disturbed.
+  const slTargetMarkersRef = useRef<Map<number, SeriesMarker<Time>[]>>(new Map());
+  // slTargetMapRef: stores raw sl/target numbers for hit detection
   const slTargetMapRef   = useRef<Map<number, { sl: number; target: number; isBullish: boolean }>>(new Map());
-  // Active price line objects on the chart (must be removed before adding new ones)
+  // hitMarkersRef: stores "SL HIT" / "TARGET HIT" markers
+  const hitMarkersRef    = useRef<Map<number, SeriesMarker<Time>>>(new Map());
+  // Active price line objects — kept for cleanup only (no longer used for display)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const activePriceLines = useRef<any[]>([]);
 
@@ -242,15 +248,11 @@ export default function ChartComponent({
     chartStartRef.current = 0;
     
     // CRITICAL FIX: Don't clear markersRef - signals must persist across timeframe changes
-    // Instead, we'll rebuild markersRef from persistentSignalsRef for the current timeframe
+    // Rebuild markersRef from persistentSignalsRef for the current timeframe
     markersRef.current.clear();
-    slTargetMapRef.current.clear();   // clear SL/Target map on asset/timeframe change
-    // Remove active price lines on chart reset
-    if (seriesRef.current) {
-      for (const pl of activePriceLines.current) {
-        try { seriesRef.current.removePriceLine(pl); } catch { /* ignore */ }
-      }
-    }
+    slTargetMapRef.current.clear();       // clear SL/Target data
+    slTargetMarkersRef.current.clear();   // clear SL/Target visual markers
+    hitMarkersRef.current.clear();        // clear hit markers
     activePriceLines.current = [];
     
     // Restore signals for current asset+timeframe from persistent storage
@@ -278,64 +280,125 @@ export default function ChartComponent({
     let   historyLoaded   = false;
     const gone            = { current: false };
 
+    // ── flushMarkers: render BUY/SELL + SL/Target + Hit markers together ───────
+    // Combines three marker collections into one setMarkers() call:
+    //  1. markersRef       — BUY/SELL signal arrows (one per candle, deduped)
+    //  2. slTargetMarkersRef — SL and Target labels on each signal candle
+    //  3. hitMarkersRef    — "SL HIT" / "TARGET HIT" labels when price is reached
     const flushMarkers = (minTime = chartStartRef.current) => {
       if (!seriesRef.current) return;
-      const all = [...markersRef.current.values()];
+
+      const signalMarkers  = [...markersRef.current.values()];
+      const slTgtMarkers   = [...slTargetMarkersRef.current.values()].flat();
+      const hitMarkers     = [...hitMarkersRef.current.values()];
+
+      const all = [...signalMarkers, ...slTgtMarkers, ...hitMarkers];
       const vis = minTime > 0 ? all.filter(m => (m.time as number) >= minTime) : all;
-      try { seriesRef.current.setMarkers(vis.sort((a, b) => (a.time as number) - (b.time as number))); }
-      catch { /* chart resetting */ }
-      // After rendering markers, draw SL and Target price lines
-      renderSLTargetLines();
-    };
-
-    // ── Render SL and Target as horizontal price lines on the chart ──────────
-    // Shows the Stop Loss (red) and Target (green) of the MOST RECENT signal.
-    // Lines are drawn using the series.createPriceLine() API from lightweight-charts.
-    // Old lines are removed first to avoid accumulation.
-    const renderSLTargetLines = () => {
-      if (!seriesRef.current) return;
-
-      // Remove all previously drawn SL/Target lines
-      for (const pl of activePriceLines.current) {
-        try { seriesRef.current.removePriceLine(pl); } catch { /* already removed */ }
-      }
-      activePriceLines.current = [];
-
-      if (slTargetMapRef.current.size === 0) return;
-
-      // Find the most recent signal (highest candle time)
-      let latestTime = 0;
-      for (const t of slTargetMapRef.current.keys()) {
-        if (t > latestTime) latestTime = t;
-      }
-      const latest = slTargetMapRef.current.get(latestTime);
-      if (!latest) return;
-
-      const { sl, target, isBullish } = latest;
 
       try {
-        // Stop Loss line — red dashed
-        const slLine = seriesRef.current.createPriceLine({
-          price:       sl,
-          color:       '#ef4444',
-          lineWidth:   1,
-          lineStyle:   2, // dashed
-          axisLabelVisible: true,
-          title:       `SL  ${sl.toFixed(2)}`,
-        });
-        activePriceLines.current.push(slLine);
+        seriesRef.current.setMarkers(
+          vis.sort((a, b) => (a.time as number) - (b.time as number))
+        );
+      } catch { /* chart resetting */ }
 
-        // Target line — green dashed
-        const tgtLine = seriesRef.current.createPriceLine({
-          price:       target,
-          color:       '#10b981',
-          lineWidth:   1,
-          lineStyle:   2, // dashed
-          axisLabelVisible: true,
-          title:       `Target  ${target.toFixed(2)}`,
-        });
-        activePriceLines.current.push(tgtLine);
-      } catch { /* chart may be resetting */ }
+      // Remove full-width price lines (old approach — replaced by per-candle markers)
+      for (const pl of activePriceLines.current) {
+        try { seriesRef.current.removePriceLine(pl); } catch { /* ignore */ }
+      }
+      activePriceLines.current = [];
+    };
+
+    // ── buildSLTargetMarkers: create SL + Target labels for one signal ───────
+    // Returns two SeriesMarker entries to be stored in slTargetMarkersRef.
+    //
+    // Visual layout:
+    //   BUY signal  → SL label BELOW candle (red circle),  Target ABOVE (green circle)
+    //   SELL signal → SL label ABOVE candle (red circle),  Target BELOW (green circle)
+    //
+    // "circle" shape is used so SL/Target don't visually clash with the
+    // arrowUp/arrowDown shapes used for BUY/SELL signals.
+    const buildSLTargetMarkers = (
+      candleTime: number,
+      isBullish: boolean,
+      sl: number,
+      target: number,
+    ): SeriesMarker<Time>[] => {
+      const t = candleTime as Time;
+      if (isBullish) {
+        return [
+          // SL below the candle (red circle)
+          {
+            time:     t,
+            position: 'belowBar',
+            color:    '#ef4444',
+            shape:    'circle',
+            text:     `SL ${sl.toFixed(2)}`,
+            size:     1,
+          },
+          // Target above the candle (green circle)
+          {
+            time:     t,
+            position: 'aboveBar',
+            color:    '#10b981',
+            shape:    'circle',
+            text:     `T ${target.toFixed(2)}`,
+            size:     1,
+          },
+        ];
+      } else {
+        return [
+          // SL above the candle (red circle)
+          {
+            time:     t,
+            position: 'aboveBar',
+            color:    '#ef4444',
+            shape:    'circle',
+            text:     `SL ${sl.toFixed(2)}`,
+            size:     1,
+          },
+          // Target below the candle (green circle)
+          {
+            time:     t,
+            position: 'belowBar',
+            color:    '#10b981',
+            shape:    'circle',
+            text:     `T ${target.toFixed(2)}`,
+            size:     1,
+          },
+        ];
+      }
+    };
+
+    // ── checkHits: detect if price has reached SL or Target ──────────────────
+    // Called on every kline tick. Adds a hit marker on the candle where price
+    // first touches the SL or Target level of an active signal.
+    const checkHits = (currentHigh: number, currentLow: number, currentTime: number) => {
+      for (const [sigTime, { sl, target, isBullish }] of slTargetMapRef.current.entries()) {
+        // Skip if this signal already has a hit marker
+        if (hitMarkersRef.current.has(sigTime)) continue;
+
+        const tHit = isBullish
+          ? currentHigh >= target   // BUY: target hit when price rises to target
+          : currentLow  <= target;  // SELL: target hit when price falls to target
+
+        const slHit = isBullish
+          ? currentLow  <= sl       // BUY: SL hit when price falls to SL
+          : currentHigh >= sl;      // SELL: SL hit when price rises to SL
+
+        if (tHit || slHit) {
+          const hitTime = currentTime as Time;
+          const isTargetHit = tHit && !slHit; // if both, SL takes priority
+          hitMarkersRef.current.set(sigTime, {
+            time:     hitTime,
+            position: isTargetHit ? (isBullish ? 'aboveBar' : 'belowBar')
+                                  : (isBullish ? 'belowBar' : 'aboveBar'),
+            color:    isTargetHit ? '#10b981' : '#ef4444',
+            shape:    'square',
+            text:     isTargetHit ? '✓ TARGET HIT' : '✗ SL HIT',
+            size:     1,
+          });
+        }
+      }
     };
 
     // ── Apply one Binance kline tick to the chart ─────────────────────────────
@@ -358,6 +421,16 @@ export default function ChartComponent({
       setLastPrice(close);
       onPriceUpdate?.(asset, close);
       try { seriesRef.current?.update(candle); } catch { /* ignore */ }
+
+      // Check if current price has hit any signal's SL or Target
+      if (slTargetMapRef.current.size > 0) {
+        const prevHitCount = hitMarkersRef.current.size;
+        checkHits(candle.high, candle.low, start as number);
+        if (hitMarkersRef.current.size > prevHitCount) {
+          // New hit detected — refresh markers to show hit label
+          flushMarkers();
+        }
+      }
     };
 
     // ════════════════════════════════════════════════════════════════════════
@@ -726,10 +799,18 @@ export default function ChartComponent({
       const typeAlternates = !lastExisting || (lastExisting.shape !== marker.shape);
 
       if (!markersRef.current.has(t) && typeAlternates) {
+        // Build SL/Target markers for this WebSocket signal
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const nzAny = newestZone as any;
+        const wsSl  = nzAny.stop_loss != null ? Number(nzAny.stop_loss)  : null;
+        const wsTgt = nzAny.target    != null ? Number(nzAny.target)     : null;
+        if (wsSl != null && wsTgt != null) {
+          slTargetMapRef.current.set(t, { sl: wsSl, target: wsTgt, isBullish: newestZone.is_bullish });
+          slTargetMarkersRef.current.set(t, buildSLTargetMarkers(t, newestZone.is_bullish, wsSl, wsTgt));
+        }
         mergeAndFlush([marker]);
         setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
       } else {
-        // Signal already present or same type as last — just update status display
         setSignalStatus({ last_signal: s.signal, tracking: s.tracking });
       }
     };
@@ -747,7 +828,7 @@ export default function ChartComponent({
 
       try {
         // ── STEP 1: DB signals (permanent, never repaint) ──────────────────
-        const dbRaw: Array<{ is_bullish: boolean; timestamp: string }> = [];
+        const dbRaw: Array<{ is_bullish: boolean; timestamp: string; stop_loss?: number; target?: number; status?: string }> = [];
         try {
           const r = await fetch(`/api/trading/signal-history/${asset}/?timeframe=${timeframe}`);
           if (r.ok && !gone.current) {
@@ -761,17 +842,19 @@ export default function ChartComponent({
         // Build DB markers and record their candle-aligned local timestamps
         const dbLocalTimes = new Set<number>();
         const dbMarkers = dbRaw.map(z => {
-          const m = zoneToMarker(z, ivl);
-          dbLocalTimes.add(m.time as number);
-          // Store SL/Target for price line rendering
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const zAny = z as any;
-          if (zAny.stop_loss != null && zAny.target != null) {
-            slTargetMapRef.current.set(m.time as number, {
-              sl:        Number(zAny.stop_loss),
-              target:    Number(zAny.target),
-              isBullish: z.is_bullish,
-            });
+          const m  = zoneToMarker(z, ivl);
+          const t  = m.time as number;
+          dbLocalTimes.add(t);
+
+          // Build SL/Target markers on the SAME candle as the signal
+          const sl  = z.stop_loss  != null ? Number(z.stop_loss)  : null;
+          const tgt = z.target     != null ? Number(z.target)     : null;
+
+          if (sl != null && tgt != null) {
+            // Store for hit detection
+            slTargetMapRef.current.set(t, { sl, target: tgt, isBullish: z.is_bullish });
+            // Build per-candle SL/Target labels
+            slTargetMarkersRef.current.set(t, buildSLTargetMarkers(t, z.is_bullish, sl, tgt));
           }
           return m;
         }).sort((a, b) => (a.time as number) - (b.time as number));
@@ -780,7 +863,7 @@ export default function ChartComponent({
         // The backend now returns DB records + at most one live_pending zone
         // (the most-recent candle not yet saved to DB by the Celery task).
         let liveStatus: { last_signal: string; tracking: string } | null = null;
-        const pendingRaw: Array<{ is_bullish: boolean; timestamp: string }> = [];
+        const pendingRaw: Array<{ is_bullish: boolean; timestamp: string; stop_loss?: number; target?: number }> = [];
         try {
           const r = await fetch(`/api/trading/reversal-zones/${asset}/?timeframe=${timeframe}`);
           if (r.ok && !gone.current) {
@@ -813,17 +896,22 @@ export default function ChartComponent({
         }
 
         // Live pending (newest unsaved candle) — ONLY if new timestamp AND alternates
-        // FIX: Without this alternation check, live_pending can be BUY when last DB
-        // signal was also BUY, creating consecutive BUY→BUY on the chart.
         for (const z of pendingRaw) {
           const m = zoneToMarker(z, ivl);
           const t = m.time as number;
           if (seen.has(t) || dbLocalTimes.has(t)) continue;
-          // Alternation check: pending must be opposite type to last DB signal
           const pendingShape = m.shape as string;
           if (lastSignalShape !== null && pendingShape === lastSignalShape) continue;
           final.push(m);
           seen.add(t);
+
+          // Build SL/Target markers for this pending signal
+          const pSl  = z.stop_loss != null ? Number(z.stop_loss)  : null;
+          const pTgt = z.target    != null ? Number(z.target)     : null;
+          if (pSl != null && pTgt != null) {
+            slTargetMapRef.current.set(t, { sl: pSl, target: pTgt, isBullish: z.is_bullish });
+            slTargetMarkersRef.current.set(t, buildSLTargetMarkers(t, z.is_bullish, pSl, pTgt));
+          }
           // Do NOT persist — will be superseded once Celery saves it to DB
         }
 

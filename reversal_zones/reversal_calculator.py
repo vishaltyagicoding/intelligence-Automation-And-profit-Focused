@@ -429,38 +429,49 @@ class ReversalZoneCalculator:
                 strictly_alternating.append(rev)
         self.reversals = strictly_alternating
 
-        # ── Build output with PROFESSIONAL stop loss and target ──────────────
-        # Replace the old tiny outer_half formula with swing-structure SL/Target.
-        # outer_top  = higher price level  (target for BUY,  stop loss for SELL)
-        # outer_bottom = lower price level (stop loss for BUY, target for SELL)
+        # ── Build output with stop loss and target ──────────────────────────
+        # Zones output uses ORIGINAL pivot timestamps.
+        # The newest zone also carries confirmation-candle data so the API
+        # can override its display timestamp without touching the DB timestamp.
         zones = []
-        n_df = len(df)
-        for r in self.reversals[-self.cfg.max_zones:]:
+        n_df  = len(df)
+
+        # Confirmation candle = last closed bar (df has open candle stripped)
+        confirm_bar_idx = n_df - 1
+        confirm_ts      = df.index[confirm_bar_idx]
+        confirm_high    = float(df['high'].iloc[confirm_bar_idx])
+        confirm_low     = float(df['low'].iloc[confirm_bar_idx])
+
+        for idx_r, r in enumerate(self.reversals[-self.cfg.max_zones:]):
             bar_idx = min(max(r.bar_index, 0), n_df - 1)
+            entry   = r.price
 
-            # ATR at the signal bar (fallback: 0.2% of price)
-            atr_val = (
-                float(self._atr_series.iloc[bar_idx])
-                if bar_idx < len(self._atr_series)
-                   and not pd.isna(self._atr_series.iloc[bar_idx])
-                else abs(r.price) * 0.002
-            )
+            # ── SL and Target: NEW rules (per-signal, from the signal bar) ────
+            # BUY:  SL = low  of signal bar; Target = Entry + 2×risk (1:2 RR)
+            # SELL: SL = high of signal bar; Target = Entry − 2×risk (1:2 RR)
+            sig_high = float(df['high'].iloc[bar_idx])
+            sig_low  = float(df['low'].iloc[bar_idx])
 
-            # Professional stop loss & target
-            stop_loss, target = _professional_sl_target(
-                df=df,
-                bar_index=bar_idx,
-                center_price=r.price,
-                is_bullish=r.is_bullish,
-                atr_now=atr_val,
-                timeframe=self.timeframe,
-            )
+            if r.is_bullish:
+                stop_loss = sig_low
+                risk      = abs(entry - stop_loss)
+                target    = entry + 2.0 * risk
+            else:
+                stop_loss = sig_high
+                risk      = abs(stop_loss - entry)
+                target    = entry - 2.0 * risk
 
-            # Layout:
-            #   BUY  → outer_bottom = stop_loss (below entry)
-            #           outer_top   = target    (above entry)
-            #   SELL → outer_top    = stop_loss (above entry)
-            #           outer_bottom = target   (below entry)
+            # Safety guards: SL and Target must be on correct side
+            if r.is_bullish:
+                stop_loss = min(stop_loss, entry * 0.9999)
+                target    = max(target,    entry * 1.0001)
+            else:
+                stop_loss = max(stop_loss, entry * 1.0001)
+                target    = min(target,    entry * 0.9999)
+
+            stop_loss = round(stop_loss, 8)
+            target    = round(target,    8)
+
             if r.is_bullish:
                 outer_top_val    = target
                 outer_bottom_val = stop_loss
@@ -468,23 +479,38 @@ class ReversalZoneCalculator:
                 outer_top_val    = stop_loss
                 outer_bottom_val = target
 
-            # Keep core zone tight around entry for chart visualisation
-            core_half = max(atr_val * 0.12, abs(r.price) * 0.00015)
+            atr_val = (
+                float(self._atr_series.iloc[bar_idx])
+                if bar_idx < len(self._atr_series)
+                   and not pd.isna(self._atr_series.iloc[bar_idx])
+                else abs(entry) * 0.002
+            )
+            core_half = max(atr_val * 0.12, abs(entry) * 0.00015)
 
             ts = r.timestamp if hasattr(r, 'timestamp') else df.index[bar_idx]
+
+            is_newest = (idx_r == len(self.reversals[-self.cfg.max_zones:]) - 1)
+
             zones.append({
-                'bar_index':    r.bar_index,
-                'center_price': r.price,
-                'stop_loss':    stop_loss,      # Add explicit stop_loss field
-                'target':       target,         # Add explicit target field
-                'outer_top':    outer_top_val,
-                'outer_bottom': outer_bottom_val,
-                'core_top':     r.price + core_half,
-                'core_bottom':  r.price - core_half,
-                'is_bullish':   r.is_bullish,
-                'label_text':   'BUY' if r.is_bullish else 'SELL',
-                'reversal_time': ts,
-                'timestamp':     ts,
+                'bar_index':      r.bar_index,
+                'center_price':   entry,
+                'stop_loss':      stop_loss,
+                'target':         target,
+                'outer_top':      outer_top_val,
+                'outer_bottom':   outer_bottom_val,
+                'core_top':       entry + core_half,
+                'core_bottom':    entry - core_half,
+                'is_bullish':     r.is_bullish,
+                'label_text':     'BUY' if r.is_bullish else 'SELL',
+                'reversal_time':  ts,              # original pivot timestamp (DB key)
+                'timestamp':      ts,              # original pivot timestamp
+                # Extra confirmation-candle data on the NEWEST zone only.
+                # views.py uses this to show the newest signal on the current
+                # candle without changing the DB timestamp.
+                'confirm_ts':     confirm_ts    if is_newest else None,
+                'confirm_high':   confirm_high  if is_newest else None,
+                'confirm_low':    confirm_low   if is_newest else None,
+                'is_newest':      is_newest,
             })
         
         path_segments = []

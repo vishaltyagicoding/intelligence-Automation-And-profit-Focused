@@ -135,6 +135,12 @@ export default function ChartComponent({
   // Key format: "BTCUSD:5m:1234567890" → SeriesMarker
   // This ensures signals NEVER disappear when switching timeframes or refreshing
   const persistentSignalsRef = useRef<Map<string, SeriesMarker<Time>>>(new Map());
+  // SL and Target price lines: keyed by candle time → {sl, target, isBullish}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const slTargetMapRef   = useRef<Map<number, { sl: number; target: number; isBullish: boolean }>>(new Map());
+  // Active price line objects on the chart (must be removed before adding new ones)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activePriceLines = useRef<any[]>([]);
 
   const [lastPrice,    setLastPrice]    = useState<number | null>(null);
   const [signalStatus, setSignalStatus] = useState<{ last_signal: string; tracking: string } | null>(null);
@@ -238,6 +244,14 @@ export default function ChartComponent({
     // CRITICAL FIX: Don't clear markersRef - signals must persist across timeframe changes
     // Instead, we'll rebuild markersRef from persistentSignalsRef for the current timeframe
     markersRef.current.clear();
+    slTargetMapRef.current.clear();   // clear SL/Target map on asset/timeframe change
+    // Remove active price lines on chart reset
+    if (seriesRef.current) {
+      for (const pl of activePriceLines.current) {
+        try { seriesRef.current.removePriceLine(pl); } catch { /* ignore */ }
+      }
+    }
+    activePriceLines.current = [];
     
     // Restore signals for current asset+timeframe from persistent storage
     const currentKey = `${asset}:${timeframe}:`;
@@ -270,6 +284,58 @@ export default function ChartComponent({
       const vis = minTime > 0 ? all.filter(m => (m.time as number) >= minTime) : all;
       try { seriesRef.current.setMarkers(vis.sort((a, b) => (a.time as number) - (b.time as number))); }
       catch { /* chart resetting */ }
+      // After rendering markers, draw SL and Target price lines
+      renderSLTargetLines();
+    };
+
+    // ── Render SL and Target as horizontal price lines on the chart ──────────
+    // Shows the Stop Loss (red) and Target (green) of the MOST RECENT signal.
+    // Lines are drawn using the series.createPriceLine() API from lightweight-charts.
+    // Old lines are removed first to avoid accumulation.
+    const renderSLTargetLines = () => {
+      if (!seriesRef.current) return;
+
+      // Remove all previously drawn SL/Target lines
+      for (const pl of activePriceLines.current) {
+        try { seriesRef.current.removePriceLine(pl); } catch { /* already removed */ }
+      }
+      activePriceLines.current = [];
+
+      if (slTargetMapRef.current.size === 0) return;
+
+      // Find the most recent signal (highest candle time)
+      let latestTime = 0;
+      for (const t of slTargetMapRef.current.keys()) {
+        if (t > latestTime) latestTime = t;
+      }
+      const latest = slTargetMapRef.current.get(latestTime);
+      if (!latest) return;
+
+      const { sl, target, isBullish } = latest;
+
+      try {
+        // Stop Loss line — red dashed
+        const slLine = seriesRef.current.createPriceLine({
+          price:       sl,
+          color:       '#ef4444',
+          lineWidth:   1,
+          lineStyle:   2, // dashed
+          axisLabelVisible: true,
+          title:       `SL  ${sl.toFixed(2)}`,
+        });
+        activePriceLines.current.push(slLine);
+
+        // Target line — green dashed
+        const tgtLine = seriesRef.current.createPriceLine({
+          price:       target,
+          color:       '#10b981',
+          lineWidth:   1,
+          lineStyle:   2, // dashed
+          axisLabelVisible: true,
+          title:       `Target  ${target.toFixed(2)}`,
+        });
+        activePriceLines.current.push(tgtLine);
+      } catch { /* chart may be resetting */ }
     };
 
     // ── Apply one Binance kline tick to the chart ─────────────────────────────
@@ -697,6 +763,16 @@ export default function ChartComponent({
         const dbMarkers = dbRaw.map(z => {
           const m = zoneToMarker(z, ivl);
           dbLocalTimes.add(m.time as number);
+          // Store SL/Target for price line rendering
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const zAny = z as any;
+          if (zAny.stop_loss != null && zAny.target != null) {
+            slTargetMapRef.current.set(m.time as number, {
+              sl:        Number(zAny.stop_loss),
+              target:    Number(zAny.target),
+              isBullish: z.is_bullish,
+            });
+          }
           return m;
         }).sort((a, b) => (a.time as number) - (b.time as number));
 

@@ -281,41 +281,87 @@ def get_reversal_zones(request, symbol):
         # ── Step 4: Append the most-recent live signal ONLY if it is genuinely
         # new (not yet saved to DB) AND alternates correctly with the last DB signal.
         #
-        # ANTI-CONSECUTIVE BUG FIX:
-        # Without the alternation check here, the live_pending zone could be the
-        # SAME type as the last DB signal (e.g. DB last = BUY, live_pending = BUY).
-        # This would render consecutive BUY→BUY on the chart even though the DB
-        # alternation is correct. The live calculator sometimes fires the same type
-        # again on the very latest candle before the Celery task has saved a
-        # balancing SELL in between.
+        # DISPLAY ON CURRENT CANDLE:
+        # The live_pending signal is the newest pivot just detected by the calculator.
+        # Its original timestamp points to the PIVOT bar (may be 6-8 bars back).
+        # We override its timestamp to the CONFIRMATION candle (last closed bar)
+        # so the chart marker appears on the CURRENT candle, not in the past.
+        # This does NOT affect the DB — when Celery saves it, it uses the
+        # original pivot timestamp from r.timestamp inside _save_signal_to_db.
+        #
+        # SL AND TARGET from confirmation candle:
+        # BUY:  SL = Low of current candle,  Target = Entry + 2×risk (1:2 RR)
+        # SELL: SL = High of current candle, Target = Entry − 2×risk (1:2 RR)
         if live_zones:
             newest_live = live_zones[-1]
-            nl_ts = newest_live.get('timestamp') or newest_live.get('reversal_time')
-            nl_ts_iso = nl_ts.isoformat() if hasattr(nl_ts, 'isoformat') else str(nl_ts)
-            nl_is_bull = newest_live['is_bullish']
-            nl_label   = 'BUY' if nl_is_bull else 'SELL'
+            nl_is_bull  = newest_live['is_bullish']
+            nl_label    = 'BUY' if nl_is_bull else 'SELL'
+
+            # ── Use confirmation candle timestamp for display ─────────────────
+            # confirm_ts is passed from the calculator via the 'confirm_ts' field.
+            # Fallback to original pivot timestamp if not available.
+            confirm_meta = newest_live.get('confirm_ts')
+            if confirm_meta is not None:
+                display_ts = confirm_meta
+            else:
+                display_ts = newest_live.get('timestamp') or newest_live.get('reversal_time')
+            display_ts_iso = display_ts.isoformat() if hasattr(display_ts, 'isoformat') else str(display_ts)
+            display_ts_iso_z = (display_ts_iso
+                                if ('+' in display_ts_iso or display_ts_iso.endswith('Z'))
+                                else display_ts_iso + '+00:00')
+
+            # ── Original pivot timestamp for DB collision check ───────────────
+            orig_ts = newest_live.get('timestamp') or newest_live.get('reversal_time')
+            orig_ts_iso = orig_ts.isoformat() if hasattr(orig_ts, 'isoformat') else str(orig_ts)
 
             # Get last DB signal type for alternation check
             last_db_label = all_zones[-1]['label'] if all_zones else None
 
             # Accept live_pending ONLY if:
-            # 1. Its timestamp is not already in DB (genuinely new candle)
-            # 2. It ALTERNATES with the last DB signal (BUY after SELL, SELL after BUY)
-            ts_is_new      = nl_ts_iso not in db_timestamps
+            # 1. Original pivot timestamp not already in DB (genuinely new signal)
+            # 2. Alternates with last DB signal type
+            ts_is_new       = orig_ts_iso not in db_timestamps
             type_alternates = (last_db_label is None) or (last_db_label != nl_label)
 
             if ts_is_new and type_alternates:
-                nl_ts_iso_z = nl_ts_iso if ('+' in nl_ts_iso or nl_ts_iso.endswith('Z')) else nl_ts_iso + '+00:00'
+                # ── SL/Target from confirmation candle ────────────────────────
+                c_high = newest_live.get('confirm_high')
+                c_low  = newest_live.get('confirm_low')
+                entry  = float(newest_live['center_price'])
+
+                if c_high is not None and c_low is not None:
+                    if nl_is_bull:
+                        nl_sl   = float(c_low)
+                        nl_risk = abs(entry - nl_sl)
+                        nl_tgt  = entry + 2.0 * nl_risk
+                    else:
+                        nl_sl   = float(c_high)
+                        nl_risk = abs(nl_sl - entry)
+                        nl_tgt  = entry - 2.0 * nl_risk
+                    # Safety guards
+                    if nl_is_bull:
+                        nl_sl  = min(nl_sl,  entry * 0.9999)
+                        nl_tgt = max(nl_tgt, entry * 1.0001)
+                    else:
+                        nl_sl  = max(nl_sl,  entry * 1.0001)
+                        nl_tgt = min(nl_tgt, entry * 0.9999)
+                else:
+                    # Fallback to calculator-provided SL/Target
+                    nl_sl  = float(newest_live.get('stop_loss')  or newest_live['outer_bottom'])
+                    nl_tgt = float(newest_live.get('target')     or newest_live['outer_top'])
+
                 all_zones.append({
                     'bar_index':    newest_live['bar_index'],
-                    'center_price': float(newest_live['center_price']),
+                    'center_price': entry,
+                    'stop_loss':    round(nl_sl,  8),
+                    'target':       round(nl_tgt, 8),
                     'outer_top':    float(newest_live['outer_top']),
                     'outer_bottom': float(newest_live['outer_bottom']),
                     'core_top':     float(newest_live['core_top']),
                     'core_bottom':  float(newest_live['core_bottom']),
                     'is_bullish':   nl_is_bull,
                     'label':        nl_label,
-                    'timestamp':    nl_ts_iso_z,
+                    'timestamp':    display_ts_iso_z,   # ← confirmation candle ts
                     'source':       'live_pending',
                 })
 

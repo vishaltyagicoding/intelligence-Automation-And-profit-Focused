@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="assets/css/main.css">
     <link rel="stylesheet" href="assets/css/animations.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<base target="_blank">
 </head>
 <body>
     <!-- Navigation -->
@@ -107,7 +108,27 @@
                 </a>
             </div>
 
-            <div class="hero-stats" data-aos="fade-up" data-aos-delay="400">
+            <!-- Hero Visual -->
+            <div class="hero-visual" data-aos="fade-up" data-aos-delay="400">
+                <div class="hero-image-frame">
+                    <img src="assets/images/dashboard-chart.png" alt="SmartRisk Live Trading Signals with BUY and SELL markers">
+                    <div class="floating-card card-top-left">
+                        <h4>Visualized Performance</h4>
+                        <p>Know what works—before risking capital.</p>
+                    </div>
+                    <div class="floating-card card-bottom-right">
+                        <h4>Real-Time Signals</h4>
+                        <p>Catch moves early without the noise.</p>
+                    </div>
+                    <div class="floating-card card-bottom-left">
+                        <h4>Auto-Mapped Key Levels</h4>
+                        <p>See where price is most likely to react.</p>
+                    </div>
+                </div>
+                <div class="hero-image-glow"></div>
+            </div>
+
+            <div class="hero-stats" data-aos="fade-up" data-aos-delay="500">
                 <div class="stat-item">
                     <div class="stat-number" data-count="4">0</div>
                     <div class="stat-label">Cryptocurrencies</div>
@@ -164,58 +185,144 @@
         </div>
     </div>
 
-    <!-- Features Section -->
-    <section class="features" id="features">
+    <!-- Intro Statement -->
+    <section class="intro-statement" id="intro">
         <div class="section-container">
-            <div class="section-header" data-aos="fade-up">
-                <span class="section-tag">Powerful Features</span>
-                <h2 class="section-title">Advanced Technology for<br><span class="gradient-text">Smart Trading</span></h2>
-                <p class="section-subtitle">Advanced technology meets intuitive design to give you the edge in cryptocurrency trading</p>
+            <div class="intro-content" data-aos="fade-up">
+                <h2>A TradingView toolkit for clarity & control</h2>
+                <p>Advanced indicators, clean chart overlays, and real-time signal generation. SmartRisk FX helps you simplify your analysis, validate your ideas, and trade with confidence.</p>
+                <p class="intro-secondary">Instead of chasing complexity, you get one focused system that supports how you actually trade—from spotting a setup to refining it and executing with discipline.</p>
             </div>
+        </div>
+    </section>
 
-            <div class="features-grid">
-                <div class="feature-card" data-aos="fade-up" data-aos-delay="100">
-                    <div class="feature-icon">
-                        <i class="fas fa-bullseye"></i>
-                    </div>
-                    <h3>SmartRisk Reversal Signals</h3>
-                    <p>Advanced TradingView Pine Script algorithm detects high-probability reversal zones in real-time with precision accuracy.</p>
-                    <div class="feature-link">
-                        <a href="https://smartriskfx.com/dashboard" target="_blank">Explore Signals <i class="fas fa-arrow-right"></i></a>
+    <!-- Section 1: Precision Signals -->
+    <section class="zigzag-section" id="features">
+        <div class="section-container">
+            <div class="zigzag-row image-left">
+                <div class="zigzag-image" data-aos="fade-right">
+                    <div class="image-frame">
+                        <img src="assets/images/dashboard-chart.png" alt="SmartRisk Precision Reversal Signals on BTCUSD Chart">
                     </div>
                 </div>
+                <div class="zigzag-content" data-aos="fade-left">
+                    <span class="section-tag">Read the Market</span>
+                    <h2 class="section-title">Precision Reversal<br><span class="gradient-text">Signals</span></h2>
+                    <p class="section-subtitle">Ditch the noise. SmartRisk surfaces high-probability reversal zones with clean visuals and clear signals that respect your strategy.</p>
 
-                <div class="feature-card" data-aos="fade-up" data-aos-delay="200">
-                    <div class="feature-icon icon-purple">
-                        <i class="fas fa-bolt"></i>
+                    <div class="feature-list">
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-brain"></i></div>
+                            <div>
+                                <h4>AI-Powered Reversal Detection</h4>
+                                <p>Advanced TradingView Pine Script algorithms identify high-probability entry zones in real-time with precision accuracy.</p>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-crosshairs"></i></div>
+                            <div>
+                                <h4>Clear Entry, Stop-Loss & Target Levels</h4>
+                                <p>Every signal displays exact entry price, SL, and TP levels directly on your chart for disciplined, rule-based trading.</p>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-layer-group"></i></div>
+                            <div>
+                                <h4>Multi-Timeframe Confirmation</h4>
+                                <p>Confirm signals across 5M, 15M, 1H, 4H, and daily charts to build confluence before entering any trade.</p>
+                            </div>
+                        </div>
                     </div>
-                    <h3>Real-Time Market Data</h3>
-                    <p>Live WebSocket connection to Binance for instant price updates and signal generation with zero latency.</p>
-                    <div class="feature-link">
-                        <a href="https://smartriskfx.com/dashboard" target="_blank">View Live Data <i class="fas fa-arrow-right"></i></a>
+
+                    <a href="https://smartriskfx.com/dashboard" class="feature-cta" target="_blank">Explore Signals <i class="fas fa-arrow-right"></i></a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 2: Live Dashboard -->
+    <section class="zigzag-section bg-alt" id="dashboard">
+        <div class="section-container">
+            <div class="zigzag-row text-left">
+                <div class="zigzag-content" data-aos="fade-right">
+                    <span class="section-tag">Live Dashboard</span>
+                    <h2 class="section-title">Your Trading Command<br><span class="gradient-text">Center</span></h2>
+                    <p class="section-subtitle">Professional-grade interface with real-time charts, multi-asset watchlist, and instant signal analytics—all in one place.</p>
+
+                    <div class="feature-list">
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-bolt"></i></div>
+                            <div>
+                                <h4>Real-Time Market Data</h4>
+                                <p>Live WebSocket connection to Binance streams price updates and signal generation with zero latency, 24/7.</p>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-list-ul"></i></div>
+                            <div>
+                                <h4>Multi-Asset Watchlist</h4>
+                                <p>Track BTC, ETH, XAU, and LTC with live prices, signal status, and one-click access to any chart.</p>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-bell"></i></div>
+                            <div>
+                                <h4>Instant Signal Alerts</h4>
+                                <p>BUY and SELL signals appear directly on your chart with clear visual markers, entry zones, and trend bias.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <a href="https://smartriskfx.com/dashboard" class="feature-cta" target="_blank">View Live Data <i class="fas fa-arrow-right"></i></a>
+                </div>
+                <div class="zigzag-image" data-aos="fade-left">
+                    <div class="image-frame">
+                        <img src="assets/images/dashboard-full.png" alt="SmartRisk Trading Dashboard with Watchlist and Live Chart">
                     </div>
                 </div>
+            </div>
+        </div>
+    </section>
 
-                <div class="feature-card" data-aos="fade-up" data-aos-delay="300">
-                    <div class="feature-icon icon-green">
-                        <i class="fas fa-chart-bar"></i>
-                    </div>
-                    <h3>Multi-Timeframe Analysis</h3>
-                    <p>Track signals across 10 timeframes from 1-minute to daily charts for complete market coverage.</p>
-                    <div class="feature-link">
-                        <a href="https://smartriskfx.com/dashboard" target="_blank">Try Timeframes <i class="fas fa-arrow-right"></i></a>
+    <!-- Section 3: Signal History -->
+    <section class="zigzag-section" id="history">
+        <div class="section-container">
+            <div class="zigzag-row image-left">
+                <div class="zigzag-image" data-aos="fade-right">
+                    <div class="image-frame">
+                        <img src="assets/images/history-page.png" alt="SmartRisk Complete Signal History Table">
                     </div>
                 </div>
+                <div class="zigzag-content" data-aos="fade-left">
+                    <span class="section-tag">Track Record</span>
+                    <h2 class="section-title">Complete Signal<br><span class="gradient-text">History</span></h2>
+                    <p class="section-subtitle">Every signal generated is logged with full trade details for complete transparency and performance validation.</p>
 
-                <div class="feature-card" data-aos="fade-up" data-aos-delay="400">
-                    <div class="feature-icon icon-orange">
-                        <i class="fas fa-shield-alt"></i>
+                    <div class="feature-list">
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-history"></i></div>
+                            <div>
+                                <h4>Full Trade History</h4>
+                                <p>Review every generated signal with entry price, stop-loss, target, and current status—all timestamped and filterable.</p>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-filter"></i></div>
+                            <div>
+                                <h4>Performance Analytics</h4>
+                                <p>Filter by asset, timeframe, and action to analyze your strategy, identify patterns, and refine your edge.</p>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-bullet"><i class="fas fa-bullseye"></i></div>
+                            <div>
+                                <h4>Target Hit Tracking</h4>
+                                <p>See which signals hit target, which are still open, and your overall win rate—no guessing, just data.</p>
+                            </div>
+                        </div>
                     </div>
-                    <h3>Signal Alternation Protection</h3>
-                    <p>Intelligent filtering ensures signals always alternate BUY → SELL → BUY for quality trades only.</p>
-                    <div class="feature-link">
-                        <a href="https://smartriskfx.com/learn" target="_blank">Learn More <i class="fas fa-arrow-right"></i></a>
-                    </div>
+
+                    <a href="https://smartriskfx.com/history" class="feature-cta" target="_blank">View Signal History <i class="fas fa-arrow-right"></i></a>
                 </div>
             </div>
         </div>
@@ -317,23 +424,17 @@
                         <source src="videos/demo.mp4" type="video/mp4">
                     </video>
 
-                    <!-- Overlay: click container = YouTube, click play btn = play locally -->
                     <div class="video-overlay" id="videoOverlay">
-                        <!-- YouTube hint bar (top) -->
                         <div class="yt-hint-bar">
                             <i class="fab fa-youtube"></i>
                             <span>Click anywhere to watch on YouTube</span>
                         </div>
-
-                        <!-- Centre: play button (stops propagation) -->
                         <button class="yt-play-ring" id="playBtn" aria-label="Play video">
                             <div class="play-button">
                                 <i class="fas fa-play"></i>
                             </div>
                             <span class="play-label">Play Preview</span>
                         </button>
-
-                        <!-- Bottom bar -->
                         <div class="yt-overlay-footer">
                             <span class="video-watch-text"><i class="fab fa-youtube"></i> @SMARTRISKsmartrisk</span>
                             <a href="https://www.youtube.com/@SMARTRISKsmartrisk" target="_blank" rel="noopener" class="yt-open-link" id="ytOpenLink">
@@ -342,7 +443,6 @@
                         </div>
                     </div>
 
-                    <!-- Pause overlay (shows while playing) -->
                     <div class="video-playing-bar" id="playingBar">
                         <button class="pause-btn" id="pauseBtn"><i class="fas fa-pause"></i></button>
                         <span>Playing preview</span>
@@ -354,108 +454,11 @@
                 <div class="video-glow"></div>
             </div>
 
-            <!-- CTA below video -->
             <div class="yt-cta-row" data-aos="fade-up" data-aos-delay="300">
                 <a href="https://www.youtube.com/@SMARTRISKsmartrisk" target="_blank" rel="noopener" class="yt-full-channel-btn">
                     <i class="fab fa-youtube"></i>
                     Visit Our Full YouTube Channel
                     <i class="fas fa-arrow-right"></i>
-                </a>
-            </div>
-        </div>
-    </section>
-
-
-    <!-- Dashboard Preview -->
-    <section class="dashboard-preview">
-        <div class="section-container">
-            <div class="preview-header" data-aos="fade-up">
-                <span class="section-tag">Live Dashboard</span>
-                <h2 class="section-title">Your Trading Command<br><span class="gradient-text">Center</span></h2>
-                <p class="section-subtitle">Professional-grade interface with real-time charts, signals, and analytics</p>
-            </div>
-
-            <div class="dashboard-mockup" data-aos="zoom-in" data-aos-delay="200">
-                <div class="mockup-frame">
-                    <div class="mockup-header">
-                        <div class="mockup-dots">
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                        </div>
-                        <div class="mockup-title">SmartRisk Dashboard</div>
-                        <div class="mockup-live">
-                            <span class="live-dot"></span> Live
-                        </div>
-                    </div>
-                    <div class="mockup-body">
-                        <div class="mockup-sidebar">
-                            <div class="watchlist-item active">
-                                <span class="coin">BTCUSD</span>
-                                <span class="price">$77,482.17</span>
-                                <span class="status active-dot">Active</span>
-                            </div>
-                            <div class="watchlist-item">
-                                <span class="coin">ETHUSD</span>
-                                <span class="price">$2,129.08</span>
-                                <span class="status">Select</span>
-                            </div>
-                            <div class="watchlist-item">
-                                <span class="coin">XAUUSD</span>
-                                <span class="price">$4,501.90</span>
-                                <span class="status">Select</span>
-                            </div>
-                            <div class="watchlist-item">
-                                <span class="coin">LTCUSD</span>
-                                <span class="price">$53.89</span>
-                                <span class="status">Select</span>
-                            </div>
-                        </div>
-                        <div class="mockup-chart">
-                            <div class="chart-toolbar">
-                                <span class="timeframe active">5M</span>
-                                <span class="timeframe">15M</span>
-                                <span class="timeframe">30M</span>
-                                <span class="timeframe">1H</span>
-                                <span class="timeframe">4H</span>
-                                <span class="timeframe">1D</span>
-                            </div>
-                            <div class="chart-signals">
-                                <div class="signal buy-signal">
-                                    <i class="fas fa-arrow-up"></i> BUY SIGNAL
-                                    <span>Bullish Reversal</span>
-                                </div>
-                                <div class="signal sell-signal">
-                                    <i class="fas fa-arrow-down"></i> SELL SIGNAL
-                                    <span>Bearish Reversal</span>
-                                </div>
-                            </div>
-                            <div class="chart-visual">
-                                <svg viewBox="0 0 600 200" class="chart-svg">
-                                    <defs>
-                                        <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stop-color="#00D4FF" stop-opacity="0.3"/>
-                                            <stop offset="100%" stop-color="#00D4FF" stop-opacity="0"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path d="M0,150 Q50,140 100,130 T200,120 T300,100 T400,110 T500,90 T600,80" 
-                                          fill="none" stroke="#00D4FF" stroke-width="2"/>
-                                    <path d="M0,150 Q50,140 100,130 T200,120 T300,100 T400,110 T500,90 T600,80 L600,200 L0,200 Z" 
-                                          fill="url(#chartGrad)"/>
-                                    <circle cx="300" cy="100" r="6" fill="#00D4FF" class="pulse-dot"/>
-                                    <circle cx="500" cy="90" r="6" fill="#FF4757" class="pulse-dot"/>
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="mockup-glow"></div>
-            </div>
-
-            <div class="preview-cta" data-aos="fade-up">
-                <a href="https://smartriskfx.com/register" class="btn-primary btn-large" target="_blank">
-                    <i class="fas fa-external-link-alt"></i>
-                    Indicator Free Trial
                 </a>
             </div>
         </div>
@@ -494,12 +497,13 @@
     <section class="pricing" id="pricing">
         <div class="section-container">
             <div class="section-header" data-aos="fade-up">
-                <span class="section-tag">Free Trial</span>
-                <h2 class="section-title">Start Your <span class="gradient-text">3-Day Free Trial</span></h2>
-                <p class="section-subtitle">Get full access to all features for 3 days. No credit card required.</p>
+                <span class="section-tag">Simple, Transparent Pricing</span>
+                <h2 class="section-title">Choose Your <span class="gradient-text">Trading Edge</span></h2>
+                <p class="section-subtitle">Every tool you need to trade like the pros. No hidden fees. Cancel anytime.</p>
             </div>
 
             <div class="pricing-grid">
+                <!-- Starter -->
                 <div class="pricing-card" data-aos="fade-up" data-aos-delay="100">
                     <div class="pricing-header">
                         <h3>Starter</h3>
@@ -514,10 +518,58 @@
                         <li><i class="fas fa-check"></i> Full Dashboard Access</li>
                         <li><i class="fas fa-check"></i> Real-Time Charts</li>
                         <li><i class="fas fa-check"></i> Signal History</li>
-                        <li><i class="fas fa-check"></i> Advanced Analytics</li>
+                        <li><i class="fas fa-check"></i> Basic Analytics</li>
                         <li class="disabled"><i class="fas fa-times"></i> Signal Alerts (Email)</li>
+                        <li class="disabled"><i class="fas fa-times"></i> Priority Support</li>
                     </ul>
                     <a href="https://smartriskfx.com/dashboard" class="pricing-btn btn-outline" target="_blank">Start Free Trial</a>
+                </div>
+
+                <!-- Pro -->
+                <div class="pricing-card featured" data-aos="fade-up" data-aos-delay="200">
+                    <div class="popular-badge">Most Popular</div>
+                    <div class="pricing-header">
+                        <h3>Pro</h3>
+                        <div class="pricing-price">
+                            <span class="currency">$</span>
+                            <span class="amount">29</span>
+                            <span class="period">/month</span>
+                        </div>
+                        <p class="pricing-desc">Everything you need to trade seriously</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="fas fa-check"></i> Everything in Starter</li>
+                        <li><i class="fas fa-check"></i> Signal Alerts (Email)</li>
+                        <li><i class="fas fa-check"></i> Advanced Analytics</li>
+                        <li><i class="fas fa-check"></i> Priority Support</li>
+                        <li><i class="fas fa-check"></i> Multi-Device Access</li>
+                        <li><i class="fas fa-check"></i> Early Feature Access</li>
+                        <li><i class="fas fa-check"></i> Cancel Anytime</li>
+                    </ul>
+                    <a href="https://smartriskfx.com/subscription" class="pricing-btn btn-primary" target="_blank">Get Pro Access</a>
+                </div>
+
+                <!-- Lifetime -->
+                <div class="pricing-card" data-aos="fade-up" data-aos-delay="300">
+                    <div class="pricing-header">
+                        <h3>Lifetime</h3>
+                        <div class="pricing-price">
+                            <span class="currency">$</span>
+                            <span class="amount">399</span>
+                            <span class="period">one-time</span>
+                        </div>
+                        <p class="pricing-desc">Best value for committed traders</p>
+                    </div>
+                    <ul class="pricing-features">
+                        <li><i class="fas fa-check"></i> Everything in Pro</li>
+                        <li><i class="fas fa-check"></i> Lifetime Access</li>
+                        <li><i class="fas fa-check"></i> All Future Updates</li>
+                        <li><i class="fas fa-check"></i> VIP Community Access</li>
+                        <li><i class="fas fa-check"></i> Personal Onboarding</li>
+                        <li><i class="fas fa-check"></i> Exclusive Webinars</li>
+                        <li><i class="fas fa-check"></i> One-Time Payment</li>
+                    </ul>
+                    <a href="https://smartriskfx.com/subscription" class="pricing-btn btn-outline" target="_blank">Get Lifetime</a>
                 </div>
             </div>
         </div>
@@ -532,57 +584,113 @@
                 <p class="section-subtitle">See what our community says about SmartRisk signals</p>
             </div>
 
-            <div class="testimonials-grid">
-                <div class="testimonial-card" data-aos="fade-up" data-aos-delay="100">
-                    <div class="testimonial-stars">
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                    </div>
-                    <p class="testimonial-text">"SmartRisk signals completely changed my trading game. The reversal detection is incredibly accurate. I've seen a 40% improvement in my win rate since using it."</p>
-                    <div class="testimonial-author">
-                        <div class="author-avatar">MK</div>
-                        <div class="author-info">
-                            <h4>Michael K.</h4>
-                            <span>Day Trader, USA</span>
+            <div class="testimonials-wrapper" data-aos="fade-up" data-aos-delay="100">
+                <div class="testimonials-track" id="testimonialsTrack">
+                    <div class="testimonial-card">
+                        <div class="testimonial-stars">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <p class="testimonial-text">"SmartRisk signals completely changed my trading game. The reversal detection is incredibly accurate. I've seen a 40% improvement in my win rate since using it."</p>
+                        <div class="testimonial-author">
+                            <div class="author-avatar">MK</div>
+                            <div class="author-info">
+                                <h4>Michael K.</h4>
+                                <span>Day Trader, USA</span>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="testimonial-card" data-aos="fade-up" data-aos-delay="200">
-                    <div class="testimonial-stars">
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                    </div>
-                    <p class="testimonial-text">"The multi-timeframe analysis is a game-changer. I can confirm signals across 5M, 15M, and 1H before entering a trade. Best signal service I've used."</p>
-                    <div class="testimonial-author">
-                        <div class="author-avatar">SR</div>
-                        <div class="author-info">
-                            <h4>Sarah R.</h4>
-                            <span>Swing Trader, UK</span>
+                    <div class="testimonial-card">
+                        <div class="testimonial-stars">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <p class="testimonial-text">"The multi-timeframe analysis is a game-changer. I can confirm signals across 5M, 15M, and 1H before entering a trade. Best signal service I've used."</p>
+                        <div class="testimonial-author">
+                            <div class="author-avatar">SR</div>
+                            <div class="author-info">
+                                <h4>Sarah R.</h4>
+                                <span>Swing Trader, UK</span>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="testimonial-card" data-aos="fade-up" data-aos-delay="300">
-                    <div class="testimonial-stars">
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star"></i>
-                        <i class="fas fa-star-half-alt"></i>
+                    <div class="testimonial-card">
+                        <div class="testimonial-stars">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star-half-alt"></i>
+                        </div>
+                        <p class="testimonial-text">"As a beginner, the SmartRisk platform made crypto trading accessible. The clear BUY/SELL signals and educational resources helped me learn while earning."</p>
+                        <div class="testimonial-author">
+                            <div class="author-avatar">JL</div>
+                            <div class="author-info">
+                                <h4>James L.</h4>
+                                <span>Beginner Trader, Australia</span>
+                            </div>
+                        </div>
                     </div>
-                    <p class="testimonial-text">"As a beginner, the SmartRisk platform made crypto trading accessible. The clear BUY/SELL signals and educational resources helped me learn while earning."</p>
-                    <div class="testimonial-author">
-                        <div class="author-avatar">JL</div>
-                        <div class="author-info">
-                            <h4>James L.</h4>
-                            <span>Beginner Trader, Australia</span>
+
+                    <div class="testimonial-card">
+                        <div class="testimonial-stars">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <p class="testimonial-text">"I've tried dozens of signal providers. SmartRisk is the only one that delivers consistent, actionable signals with clear risk management. Highly recommend the Pro plan."</p>
+                        <div class="testimonial-author">
+                            <div class="author-avatar">AT</div>
+                            <div class="author-info">
+                                <h4>Alex T.</h4>
+                                <span>Pro Trader, Canada</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="testimonial-card">
+                        <div class="testimonial-stars">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <p class="testimonial-text">"The signal history page alone is worth the subscription. Being able to backtest and verify every signal gives me confidence I never had before."</p>
+                        <div class="testimonial-author">
+                            <div class="author-avatar">EP</div>
+                            <div class="author-info">
+                                <h4>Emma P.</h4>
+                                <span>Quant Trader, Germany</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="testimonial-card">
+                        <div class="testimonial-stars">
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <p class="testimonial-text">"Went from break-even to consistently profitable in 3 months. The reversal signals catch turning points that I used to miss completely. Lifetime plan was a no-brainer."</p>
+                        <div class="testimonial-author">
+                            <div class="author-avatar">DW</div>
+                            <div class="author-info">
+                                <h4>David W.</h4>
+                                <span>Full-Time Trader, Singapore</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -851,7 +959,6 @@
 
         if (!video || !overlay || !playBtn) return;
 
-        // Play button: play video locally, stop event bubbling
         playBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             overlay.classList.add('hidden');
@@ -863,14 +970,12 @@
             });
         });
 
-        // Clicking the overlay (outside play btn) opens YouTube
         overlay.addEventListener('click', function (e) {
             if (!playBtn.contains(e.target) && (!ytOpenLink || !ytOpenLink.contains(e.target))) {
                 window.open(YT_URL, '_blank', 'noopener');
             }
         });
 
-        // Pause button
         pauseBtn.addEventListener('click', function (e) {
             e.stopPropagation();
             video.pause();
@@ -878,14 +983,12 @@
             overlay.classList.remove('hidden');
         });
 
-        // Video ends
         video.addEventListener('ended', function () {
             playingBar.classList.remove('visible');
             overlay.classList.remove('hidden');
             video.currentTime = 0;
         });
 
-        // Click video while playing to pause
         video.addEventListener('click', function (e) {
             if (!video.paused) {
                 e.stopPropagation();
@@ -897,4 +1000,4 @@
     })();
     </script>
 </body>
-</html><!-- placeholder -->
+</html>

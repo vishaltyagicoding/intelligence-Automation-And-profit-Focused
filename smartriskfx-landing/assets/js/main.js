@@ -20,6 +20,7 @@
         initParallax();
         initTypingEffect();
         initMagneticButtons();
+        initTestimonialCarousel();
     });
 
     // ============================================
@@ -34,14 +35,12 @@
         window.addEventListener('scroll', function() {
             const currentScroll = window.pageYOffset;
 
-            // Add/remove scrolled class
             if (currentScroll > 50) {
                 navbar.classList.add('scrolled');
             } else {
                 navbar.classList.remove('scrolled');
             }
 
-            // Hide/show navbar on scroll direction
             if (currentScroll > lastScroll && currentScroll > 100) {
                 navbar.style.transform = 'translateY(-100%)';
             } else {
@@ -112,8 +111,6 @@
         function update(currentTime) {
             const elapsed = currentTime - startTime;
             const progress = Math.min(elapsed / duration, 1);
-
-            // Easing function (easeOutQuart)
             const easeProgress = 1 - Math.pow(1 - progress, 4);
             const current = Math.floor(start + (target - start) * easeProgress);
 
@@ -191,7 +188,6 @@
             document.body.style.overflow = menu.classList.contains('active') ? 'hidden' : '';
         });
 
-        // Close menu when clicking a link
         menu.querySelectorAll('a').forEach(link => {
             link.addEventListener('click', () => {
                 toggle.classList.remove('active');
@@ -200,7 +196,6 @@
             });
         });
 
-        // Close menu when clicking outside
         document.addEventListener('click', function(e) {
             if (!toggle.contains(e.target) && !menu.contains(e.target)) {
                 toggle.classList.remove('active');
@@ -217,7 +212,6 @@
         const ticker = document.querySelector('.ticker-track');
         if (!ticker) return;
 
-        // Pause on hover
         ticker.addEventListener('mouseenter', () => {
             ticker.style.animationPlayState = 'paused';
         });
@@ -226,7 +220,6 @@
             ticker.style.animationPlayState = 'running';
         });
 
-        // Simulate price updates
         simulatePriceUpdates();
     }
 
@@ -235,7 +228,6 @@
 
         setInterval(() => {
             prices.forEach(price => {
-                const isUp = price.classList.contains('price-up');
                 const randomChange = (Math.random() - 0.5) * 0.5;
 
                 if (randomChange > 0.1) {
@@ -268,7 +260,7 @@
     }
 
     // ============================================
-    // TYPING EFFECT (Optional enhancement)
+    // TYPING EFFECT
     // ============================================
     function initTypingEffect() {
         const typingElements = document.querySelectorAll('.typing-effect');
@@ -297,7 +289,6 @@
     function initMagneticButtons() {
         const magneticBtns = document.querySelectorAll('.magnetic-btn, .btn-primary, .btn-secondary');
 
-        // Only on non-touch devices
         if (window.matchMedia('(pointer: coarse)').matches) return;
 
         magneticBtns.forEach(btn => {
@@ -313,6 +304,61 @@
                 this.style.transform = '';
             });
         });
+    }
+
+    // ============================================
+    // TESTIMONIAL CAROUSEL
+    // ============================================
+    function initTestimonialCarousel() {
+        const track = document.getElementById('testimonialsTrack');
+        if (!track) return;
+
+        let isDown = false;
+        let startX;
+        let scrollLeft;
+
+        track.addEventListener('mousedown', (e) => {
+            isDown = true;
+            track.style.cursor = 'grabbing';
+            startX = e.pageX - track.offsetLeft;
+            scrollLeft = track.scrollLeft;
+        });
+
+        track.addEventListener('mouseleave', () => {
+            isDown = false;
+            track.style.cursor = 'grab';
+        });
+
+        track.addEventListener('mouseup', () => {
+            isDown = false;
+            track.style.cursor = 'grab';
+        });
+
+        track.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            e.preventDefault();
+            const x = e.pageX - track.offsetLeft;
+            const walk = (x - startX) * 2;
+            track.scrollLeft = scrollLeft - walk;
+        });
+
+        // Touch support
+        track.addEventListener('touchstart', (e) => {
+            isDown = true;
+            startX = e.touches[0].pageX - track.offsetLeft;
+            scrollLeft = track.scrollLeft;
+        }, { passive: true });
+
+        track.addEventListener('touchend', () => {
+            isDown = false;
+        });
+
+        track.addEventListener('touchmove', (e) => {
+            if (!isDown) return;
+            const x = e.touches[0].pageX - track.offsetLeft;
+            const walk = (x - startX) * 2;
+            track.scrollLeft = scrollLeft - walk;
+        }, { passive: true });
     }
 
     // ============================================
@@ -341,7 +387,6 @@
         }, { passive: true });
     }
 
-    // Initialize scroll progress
     initScrollProgress();
 
     // ============================================
@@ -369,7 +414,7 @@
     initLazyLoading();
 
     // ============================================
-    // FORM VALIDATION (if forms are added later)
+    // FORM VALIDATION
     // ============================================
     function validateEmail(email) {
         const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -427,51 +472,46 @@
         }
     }
 
-
     // ============================================
     // VIDEO PLAYER FUNCTIONALITY
     // ============================================
     initVideoPlayer();
 
-function initVideoPlayer() {
-    const videoContainer = document.getElementById('videoContainer');
-    const videoOverlay = document.getElementById('videoOverlay');
-    const youtubeVideo = document.getElementById('youtubeVideo');
+    function initVideoPlayer() {
+        const videoContainer = document.getElementById('videoContainer');
+        const videoOverlay = document.getElementById('videoOverlay');
+        const youtubeVideo = document.getElementById('youtubeVideo');
 
-    if (!videoContainer || !videoOverlay || !youtubeVideo) return;
+        if (!videoContainer || !videoOverlay) return;
 
-    let isPlaying = false;
-    let clickCount = 0;
+        let isPlaying = false;
+        let clickCount = 0;
 
-    videoOverlay.addEventListener('click', function() {
-        clickCount++;
-
-        if (clickCount === 1) {
-            // First click - start playing
-            isPlaying = true;
-            videoOverlay.classList.add('hidden');
-            videoContainer.classList.add('playing');
-
-            // Send play command to YouTube iframe
-            youtubeVideo.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-
-        } else if (clickCount === 2) {
-            // Second click - redirect to YouTube with autoplay
-            window.open('https://www.youtube.com/watch?v=xKoD-CWqXdU&autoplay=1', '_blank');
-        }
-    });
-
-    // Also handle clicks on the video container when overlay is hidden
-    videoContainer.addEventListener('click', function(e) {
-        if (isPlaying && clickCount >= 1) {
-            // Increment click count when clicking on playing video
+        videoOverlay.addEventListener('click', function() {
             clickCount++;
-            if (clickCount >= 3) {
+
+            if (clickCount === 1) {
+                isPlaying = true;
+                videoOverlay.classList.add('hidden');
+                videoContainer.classList.add('playing');
+
+                if (youtubeVideo) {
+                    youtubeVideo.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+                }
+            } else if (clickCount === 2) {
                 window.open('https://www.youtube.com/watch?v=xKoD-CWqXdU&autoplay=1', '_blank');
             }
-        }
-    });
-}
+        });
+
+        videoContainer.addEventListener('click', function(e) {
+            if (isPlaying && clickCount >= 1) {
+                clickCount++;
+                if (clickCount >= 3) {
+                    window.open('https://www.youtube.com/watch?v=xKoD-CWqXdU&autoplay=1', '_blank');
+                }
+            }
+        });
+    }
 
     // ============================================
     // CONSOLE BRANDING

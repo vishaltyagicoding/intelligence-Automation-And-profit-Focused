@@ -253,6 +253,12 @@ export default function ChartComponent({
     slTargetMapRef.current.clear();       // clear SL/Target data
     slTargetMarkersRef.current.clear();   // clear SL/Target visual markers
     hitMarkersRef.current.clear();        // clear hit markers
+    // Remove all line series from chart before clearing the ref
+    if (chartRef.current) {
+      for (const ls of activePriceLines.current) {
+        try { chartRef.current.removeSeries(ls); } catch { /* ignore */ }
+      }
+    }
     activePriceLines.current = [];
     
     // Restore signals for current asset+timeframe from persistent storage
@@ -282,7 +288,7 @@ export default function ChartComponent({
 
     // ── flushMarkers: render BUY/SELL signal arrows only ────────────────────
     // Only BUY/SELL arrows go into setMarkers().
-    // SL and Target are shown as createPriceLine() — exact horizontal price levels.
+    // SL and Target are shown as short addLineSeries() segments per signal candle.
     const flushMarkers = (minTime = chartStartRef.current) => {
       if (!seriesRef.current) return;
 
@@ -307,64 +313,85 @@ export default function ChartComponent({
     //
     // We show lines for ALL active signals (not just the latest) so users can
     // clearly see each signal's SL and Target levels on the chart.
+    // ── renderSLTargetLines ────────────────────────────────────────────────────
+    // Draws SHORT horizontal line segments for Entry, SL, and Target on each signal.
+    //
+    // WHY line series instead of createPriceLine():
+    // createPriceLine() always stretches full-width across the entire chart — it
+    // cannot be shortened. To draw a short segment (like Image 2 reference), we
+    // use chart.addLineSeries() with exactly 2 data points spanning a fixed number
+    // of candles. This gives a clean, short line attached to each signal candle.
+    //
+    // Each signal gets 3 short line series:
+    //   Entry  — grey,  starts 1 candle before signal, ends 12 candles after
+    //   SL     — red,   same span
+    //   Target — green, same span
+    //
+    // All signals are shown (not just the latest), matching Image 2.
     const renderSLTargetLines = () => {
-      if (!seriesRef.current) return;
+      if (!chartRef.current) return;
 
-      // Remove all old price lines first (clean slate every render)
-      for (const pl of activePriceLines.current) {
-        try { seriesRef.current.removePriceLine(pl); } catch { /* ignore */ }
+      // Remove all previous line series (clean slate)
+      for (const ls of activePriceLines.current) {
+        try { chartRef.current.removeSeries(ls); } catch { /* ignore */ }
       }
       activePriceLines.current = [];
 
       if (slTargetMapRef.current.size === 0) return;
 
-      // ── Show ONLY the MOST RECENT signal's lines ──────────────────────────
-      // Showing all historical signals causes dozens of cluttered lines.
-      // Only the latest signal's Entry, SL, and Target are relevant to users.
-      let latestTime = 0;
-      for (const t of slTargetMapRef.current.keys()) {
-        if (t > latestTime) latestTime = t;
+      // Short line spans: start 1 candle before signal, end 12 candles after
+      // Use TF_SEC[timeframe] directly — ivl is only in scope inside fetchSignals
+      const candleSeconds = TF_SEC[timeframe];
+      const LINE_BEFORE   = 1;
+      const LINE_AFTER    = 12;
+
+      for (const [sigTime, { sl, target, entry, isBullish }] of slTargetMapRef.current.entries()) {
+        const t0 = (sigTime - LINE_BEFORE * candleSeconds) as Time;
+        const t1 = (sigTime + LINE_AFTER  * candleSeconds) as Time;
+
+        try {
+          // ── Entry line — grey, thin solid ──────────────────────────────────
+          const entryS = chartRef.current.addLineSeries({
+            color:                  '#94a3b8',
+            lineWidth:              1,
+            priceLineVisible:       false,
+            lastValueVisible:       true,
+            crosshairMarkerVisible: false,
+            title:                  `Entry ${entry.toFixed(2)}`,
+          });
+          entryS.setData([{ time: t0, value: entry }, { time: t1, value: entry }]);
+          activePriceLines.current.push(entryS);
+
+          // ── SL line — red, solid ────────────────────────────────────────────
+          // BUY: SL is below entry (red line below signal candle)
+          // SELL: SL is above entry (red line above signal candle)
+          const slS = chartRef.current.addLineSeries({
+            color:                  '#ef4444',
+            lineWidth:              2,
+            priceLineVisible:       false,
+            lastValueVisible:       true,
+            crosshairMarkerVisible: false,
+            title:                  `SL ${sl.toFixed(2)}`,
+          });
+          slS.setData([{ time: t0, value: sl }, { time: t1, value: sl }]);
+          activePriceLines.current.push(slS);
+
+          // ── Target line — green, solid ──────────────────────────────────────
+          // BUY: Target is above entry (green line above signal candle)
+          // SELL: Target is below entry (green line below signal candle)
+          const tgtS = chartRef.current.addLineSeries({
+            color:                  '#10b981',
+            lineWidth:              2,
+            priceLineVisible:       false,
+            lastValueVisible:       true,
+            crosshairMarkerVisible: false,
+            title:                  `Target ${target.toFixed(2)}`,
+          });
+          tgtS.setData([{ time: t0, value: target }, { time: t1, value: target }]);
+          activePriceLines.current.push(tgtS);
+
+        } catch { /* chart may be resetting */ }
       }
-      const latest = slTargetMapRef.current.get(latestTime);
-      if (!latest) return;
-
-      const { sl, target, entry } = latest;
-
-      try {
-        // ── Entry line — white/grey solid, labelled "Entry" ──────────────────
-        const entryLine = seriesRef.current.createPriceLine({
-          price:            entry,
-          color:            '#94a3b8',   // slate-400 — neutral, clear
-          lineWidth:        1,
-          lineStyle:        0,           // Solid
-          axisLabelVisible: true,
-          title:            `Entry  ${entry.toFixed(2)}`,
-        });
-        activePriceLines.current.push(entryLine);
-
-        // ── Stop Loss line — red solid ────────────────────────────────────────
-        const slLine = seriesRef.current.createPriceLine({
-          price:            sl,
-          color:            '#ef4444',   // red
-          lineWidth:        2,
-          lineStyle:        0,           // Solid (matches Image 2 reference)
-          axisLabelVisible: true,
-          title:            `SL  ${sl.toFixed(2)}`,
-        });
-        activePriceLines.current.push(slLine);
-
-        // ── Target line — green solid ─────────────────────────────────────────
-        const tgtLine = seriesRef.current.createPriceLine({
-          price:            target,
-          color:            '#10b981',   // green
-          lineWidth:        2,
-          lineStyle:        0,           // Solid (matches Image 2 reference)
-          axisLabelVisible: true,
-          title:            `Target  ${target.toFixed(2)}`,
-        });
-        activePriceLines.current.push(tgtLine);
-
-      } catch { /* chart may be resetting */ }
     };
 
     // ── buildSLTargetMarkers: no-op stub (kept for call-site compatibility) ──
@@ -825,8 +852,8 @@ export default function ChartComponent({
           if (sl != null && tgt != null) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const entry = z.center_price != null ? Number(z.center_price) : (sl + tgt) / 2;
-            // Store ALL signals keyed by candle time — renderSLTargetLines
-            // uses only the MOST RECENT one, keeping chart clean (3 lines only)
+            // Store all signals — renderSLTargetLines draws a short
+            // Entry/SL/Target line segment for EVERY signal candle.
             slTargetMapRef.current.set(t, { sl, target: tgt, entry, isBullish: z.is_bullish });
           }
           return m;

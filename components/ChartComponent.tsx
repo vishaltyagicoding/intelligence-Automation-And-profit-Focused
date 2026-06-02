@@ -339,55 +339,77 @@ export default function ChartComponent({
 
       if (slTargetMapRef.current.size === 0) return;
 
-      // Short line spans: start 1 candle before signal, end 12 candles after
-      // Use TF_SEC[timeframe] directly — ivl is only in scope inside fetchSignals
       const candleSeconds = TF_SEC[timeframe];
-      const LINE_BEFORE   = 1;
-      const LINE_AFTER    = 12;
+      // Line spans: 1 candle before signal → 8 candles after (shorter, cleaner)
+      const LINE_BEFORE = 1;
+      const LINE_AFTER  = 8;
+      // Label is placed at the MID-POINT of the line (4 candles after signal)
+      // so the text appears right beside the signal candle, not at the right edge.
+      const LABEL_AT    = 4;
 
-      for (const [sigTime, { sl, target, entry, isBullish }] of slTargetMapRef.current.entries()) {
-        const t0 = (sigTime - LINE_BEFORE * candleSeconds) as Time;
-        const t1 = (sigTime + LINE_AFTER  * candleSeconds) as Time;
+      for (const [sigTime, { sl, target, entry }] of slTargetMapRef.current.entries()) {
+        const t0    = (sigTime - LINE_BEFORE * candleSeconds) as Time;
+        const t1    = (sigTime + LINE_AFTER  * candleSeconds) as Time;
+        const tLbl  = (sigTime + LABEL_AT    * candleSeconds) as Time;
 
         try {
-          // ── Entry line — grey, thin solid ──────────────────────────────────
+          // ── Entry line — white, thin ──────────────────────────────────────
+          // lastValueVisible: false removes the right-edge label.
+          // Instead we put a SeriesMarker at tLbl (mid-line) with the text.
           const entryS = chartRef.current.addLineSeries({
-            color:                  '#94a3b8',
+            color:                  '#ffffff',
             lineWidth:              1,
             priceLineVisible:       false,
-            lastValueVisible:       true,
+            lastValueVisible:       false,
             crosshairMarkerVisible: false,
-            title:                  `Entry ${entry.toFixed(2)}`,
           });
           entryS.setData([{ time: t0, value: entry }, { time: t1, value: entry }]);
+          entryS.setMarkers([{
+            time:     tLbl,
+            position: 'inBar',
+            color:    '#ffffff',
+            shape:    'circle',
+            text:     `Entry ${entry.toFixed(2)}`,
+            size:     0,
+          }]);
           activePriceLines.current.push(entryS);
 
-          // ── SL line — red, solid ────────────────────────────────────────────
-          // BUY: SL is below entry (red line below signal candle)
-          // SELL: SL is above entry (red line above signal candle)
+          // ── SL line — red ─────────────────────────────────────────────────
           const slS = chartRef.current.addLineSeries({
             color:                  '#ef4444',
             lineWidth:              2,
             priceLineVisible:       false,
-            lastValueVisible:       true,
+            lastValueVisible:       false,
             crosshairMarkerVisible: false,
-            title:                  `SL ${sl.toFixed(2)}`,
           });
           slS.setData([{ time: t0, value: sl }, { time: t1, value: sl }]);
+          slS.setMarkers([{
+            time:     tLbl,
+            position: 'inBar',
+            color:    '#ef4444',
+            shape:    'circle',
+            text:     `SL ${sl.toFixed(2)}`,
+            size:     0,
+          }]);
           activePriceLines.current.push(slS);
 
-          // ── Target line — green, solid ──────────────────────────────────────
-          // BUY: Target is above entry (green line above signal candle)
-          // SELL: Target is below entry (green line below signal candle)
+          // ── Target (TP) line — green ──────────────────────────────────────
           const tgtS = chartRef.current.addLineSeries({
             color:                  '#10b981',
             lineWidth:              2,
             priceLineVisible:       false,
-            lastValueVisible:       true,
+            lastValueVisible:       false,
             crosshairMarkerVisible: false,
-            title:                  `Target ${target.toFixed(2)}`,
           });
           tgtS.setData([{ time: t0, value: target }, { time: t1, value: target }]);
+          tgtS.setMarkers([{
+            time:     tLbl,
+            position: 'inBar',
+            color:    '#10b981',
+            shape:    'circle',
+            text:     `TP ${target.toFixed(2)}`,
+            size:     0,
+          }]);
           activePriceLines.current.push(tgtS);
 
         } catch { /* chart may be resetting */ }

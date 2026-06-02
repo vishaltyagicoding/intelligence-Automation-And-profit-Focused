@@ -470,8 +470,10 @@ class ReversalZoneCalculator:
             min_distance = abs(entry) * 0.003
             atr_distance = max(atr_at_bar, min_distance)
 
-            sl_distance  = 1.5 * atr_distance   # 1.5 × ATR
-            tgt_distance = 3.0 * atr_distance   # 3.0 × ATR  (2:1 RR)
+            sl_distance  = 1.0 * atr_distance   # 1.0 × ATR — practical for crypto
+            tgt_distance = 2.0 * atr_distance   # 2.0 × ATR  (2:1 RR maintained)
+            # Rationale: 1.5×ATR SL was too far (500-600 pts on BTC).
+            # 1.0×ATR gives tighter, more realistic levels. Still 1:2 RR.
 
             if r.is_bullish:
                 stop_loss = entry - sl_distance

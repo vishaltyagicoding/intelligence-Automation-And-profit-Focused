@@ -78,6 +78,13 @@ def save_zones(symbol, timeframe, zones):
                 symbol=symbol, timeframe=timeframe, reversal_time=rt,
                 defaults={
                     "center_price": z["center_price"],
+                    # stop_loss and target from calculator ATR-based logic
+                    # (1.0×ATR for SL, 2.0×ATR for Target, 1:2 RR).
+                    # These are the SINGLE SOURCE OF TRUTH for SL/Target values.
+                    # History page, live chart, and email notifications all read
+                    # these fields from the DB — so they are always identical.
+                    "stop_loss":    z.get("stop_loss"),
+                    "target":       z.get("target"),
                     "outer_top":    z["outer_top"],
                     "outer_bottom": z["outer_bottom"],
                     "core_top":     z["core_top"],

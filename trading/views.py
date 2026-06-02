@@ -271,7 +271,7 @@ def get_reversal_zones(request, symbol):
 
             all_zones.append({
                 'bar_index':    rec.bar_index,
-                'center_price': entry,
+                'center_price': round(float(entry), 2),
                 'stop_loss':    round(explicit_sl,  2),
                 'target':       round(explicit_tgt, 2),
                 'outer_top':    outer_top_val,

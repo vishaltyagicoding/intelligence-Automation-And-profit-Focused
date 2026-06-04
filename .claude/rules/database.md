@@ -1,171 +1,92 @@
-# Database Schema and Conventions
+# Database Schema — Current State
 
-## Database Configuration
-- **Engine**: PostgreSQL 16
-- **Host**: db (Docker container)
-- **Port**: 5432
-- **Database Name**: neuraltrade
-- **User**: smartrisk_user
-- **Connection Pool**: 20 connections
+## Connection
+- Engine: PostgreSQL 16
+- Host: `db` (Docker container)
+- Port: 5432
+- Name: `neuraltrade`
+- User: `smartrisk_user`
 
-## Core Models
-
-### User (Django Auth)
+## ReversalZone (core signal table)
 ```python
-# Extended from Django's AbstractUser
-- id: AutoField (PK)
-- username: CharField(150)
-- email: EmailField (unique)
-- password: CharField(128, hashed)
-- first_name: CharField(150)
-- last_name: CharField(150)
-- is_active: BooleanField
-- is_staff: BooleanField
-- is_superuser: BooleanField
-- date_joined: DateTimeField
-- last_login: DateTimeField
+symbol          CharField(20)            # 'BTCUSDT' (Binance symbol, NOT 'BTCUSD')
+timeframe       CharField(10)            # '5m','15m','30m','1h','2h','4h','1d'
+reversal_time   DateTimeField            # PIVOT BAR timestamp — NEVER changes after insert
+center_price    DecimalField(20,8)       # entry price (pivot raw price)
+stop_loss       DecimalField(20,8,null)  # 1.0×ATR below/above entry (nullable: old records may be NULL)
+target          DecimalField(20,8,null)  # 2.0×ATR above/below entry (nullable: old records may be NULL)
+outer_top       DecimalField(20,8)       # = target for BUY, = stop_loss for SELL
+outer_bottom    DecimalField(20,8)       # = stop_loss for BUY, = target for SELL
+core_top        DecimalField(20,8)       # tight zone top (entry + core_half)
+core_bottom     DecimalField(20,8)       # tight zone bottom (entry - core_half)
+is_bullish      BooleanField             # True = BUY, False = SELL
+label_text      CharField(10)           # 'BUY' or 'SELL'
+bar_index       IntegerField            # SET ONCE on INSERT — never updated (relative position)
+status          CharField(20,default='OPEN')  # 'OPEN','TARGET_HIT','SL_HIT'
+created_at      DateTimeField(auto_now_add)
+
+unique_together: ['symbol', 'timeframe', 'reversal_time']
+ordering: ['-reversal_time']
 ```
+
+### CRITICAL: bar_index Rule
+`bar_index` is a relative offset in the data window at the time of detection.
+It SHIFTS every time the calculator runs with a new window.
+**Rule**: NEVER put `bar_index` in `update_or_create` defaults.
+Set it once with `obj.bar_index = val; obj.save(update_fields=["bar_index"])` on `created=True` only.
+
+### CRITICAL: stop_loss/target Nullable
+Old signals in DB (before the ATR-based SL/Target update) have NULL stop_loss and target.
+`views.py` handles this with fallback:
+```python
+explicit_sl  = float(rec.stop_loss) if rec.stop_loss else outer_bot_val if is_bull else outer_top_val
+explicit_tgt = float(rec.target)    if rec.target    else outer_top_val if is_bull else outer_bot_val
+```
+To populate NULL records: run `python backfill_signals.py` on server.
+
+## Other Models
 
 ### UserProfile
 ```python
-- id: AutoField (PK)
-- user: OneToOneField(User)
-- phone: CharField(20, optional)
-- country: CharField(100, optional)
-- trial_start: DateTimeField
-- trial_end: DateTimeField
-- manual_subscription: CharField(20)  # 'activated' or 'deactivated'
-- created_at: DateTimeField
-- updated_at: DateTimeField
-```
-
-### ReversalZone
-```python
-- id: AutoField (PK)
-- symbol: CharField(20)  # e.g., 'BTCUSDT'
-- timeframe: CharField(10)  # e.g., '15m'
-- reversal_time: DateTimeField
-- center_price: DecimalField(20, 8)
-- outer_top: DecimalField(20, 8)
-- outer_bottom: DecimalField(20, 8)
-- core_top: DecimalField(20, 8)
-- core_bottom: DecimalField(20, 8)
-- is_bullish: BooleanField
-- label_text: CharField(10)  # 'BUY' or 'SELL'
-- bar_index: IntegerField
-- created_at: DateTimeField
-
-# Indexes
-- (symbol, timeframe, reversal_time) - unique together
-- (symbol, is_bullish)
-
-# Ordering: -reversal_time (newest first)
+user          OneToOneField(User)
+trial_start   DateTimeField
+trial_end     DateTimeField
+manual_subscription  CharField(20)   # 'activated' or 'deactivated'
 ```
 
 ### SignalAlert
 ```python
-- id: AutoField (PK)
-- user: ForeignKey(User)
-- symbol: CharField(20)
-- timeframe: CharField(10)
-- is_active: BooleanField
-- email_enabled: BooleanField
-- created_at: DateTimeField
-- updated_at: DateTimeField
-
-# Unique together: (user, symbol, timeframe)
-```
-
-### Trade
-```python
-- id: AutoField (PK)
-- user: ForeignKey(User)
-- symbol: CharField(20)
-- action: CharField(10)  # 'BUY' or 'SELL'
-- entry_price: DecimalField(20, 8)
-- stop_loss: DecimalField(20, 8, optional)
-- target: DecimalField(20, 8, optional)
-- quantity: DecimalField(20, 8)
-- status: CharField(20)  # 'OPEN', 'CLOSED', 'CANCELLED'
-- opened_at: DateTimeField
-- closed_at: DateTimeField (optional)
-- profit_loss: DecimalField(20, 8, optional)
-- created_at: DateTimeField
+user          ForeignKey(User)
+symbol        CharField(20)
+timeframe     CharField(10)
+is_active     BooleanField
+email_enabled BooleanField
+unique_together: ['user', 'symbol', 'timeframe']
 ```
 
 ### MarketSignal
 ```python
-- id: AutoField (PK)
-- symbol: CharField(20)
-- timeframe: CharField(10)
-- action: CharField(10)  # 'BUY' or 'SELL'
-- price: DecimalField(20, 8)
-- stop_loss: DecimalField(20, 8, optional)
-- target: DecimalField(20, 8, optional)
-- status: CharField(20)  # 'OPEN', 'CLOSED'
-- created_at: DateTimeField
-- updated_at: DateTimeField
+symbol        CharField(20)
+timeframe     CharField(10)
+action        CharField(10)   # 'BUY' or 'SELL'
+price         DecimalField
+stop_loss     DecimalField
+target        DecimalField
+status        CharField(20)   # 'OPEN', 'CLOSED'
 ```
-
-### ReversalStatus
-```python
-- id: AutoField (PK)
-- symbol: CharField(20, unique)
-- last_signal: CharField(10)  # 'BUY', 'SELL', 'NONE'
-- tracking: CharField(10)  # 'BUY', 'SELL', 'NONE'
-- current_price: DecimalField(20, 8, optional)
-- updated_at: DateTimeField
-```
-
-### SyntheticPathSegment
-```python
-- id: AutoField (PK)
-- symbol: CharField(20)
-- start_time: DateTimeField
-- end_time: DateTimeField
-- start_price: DecimalField(20, 8)
-- end_price: DecimalField(20, 8)
-- start_bar: IntegerField
-- end_bar: IntegerField
-- created_at: DateTimeField
-
-# Ordering: start_time
-```
-
-## Naming Conventions
-- Table names: lowercase with underscores (e.g., `reversal_zones`)
-- Column names: lowercase with underscores (e.g., `center_price`)
-- Foreign keys: `<model>_id` (e.g., `user_id`)
-- Timestamps: `created_at`, `updated_at`
-
-## Indexes Strategy
-- Primary keys: Auto-indexed
-- Foreign keys: Auto-indexed
-- Frequently queried fields: Manual indexes
-- Composite indexes for multi-column queries
-- Unique constraints where applicable
 
 ## Migrations
-- Location: `<app>/migrations/`
-- Naming: Auto-generated by Django
-- Always review before applying
-- Never edit applied migrations
+Location: `reversal_zones/migrations/`, `trading/migrations/`, etc.
+```bash
+sudo docker-compose exec django python manage.py migrate          # apply
+sudo docker-compose exec django python manage.py makemigrations   # create new
+sudo docker-compose exec django python manage.py showmigrations   # status
+```
 
-## Query Optimization
-- Use `select_related()` for ForeignKey
-- Use `prefetch_related()` for ManyToMany
-- Use `only()` to limit fields
-- Use `defer()` to exclude fields
-- Add indexes for frequently filtered fields
-
-## Data Retention
-- ReversalZone: Keep last 5 months
-- Trade history: Keep indefinitely
-- User data: Keep until account deletion
-- Logs: Rotate after 30 days
-
-## Backup Strategy
-- Automated daily backups
-- Retention: 30 days
-- Location: AWS S3 (future)
-- Manual backup command: `pg_dump neuraltrade > backup.sql`
+## Asset Symbol Mapping (frontend → Binance)
+| Frontend Symbol | Binance Symbol | Note |
+|---|---|---|
+| BTCUSD | BTCUSDT | Standard |
+| ETHUSD | ETHUSDT | Standard |
+| XAUUSD | PAXGUSDT | Gold via PAX Gold token |
+| LTCUSD | LTCUSDT | Standard |

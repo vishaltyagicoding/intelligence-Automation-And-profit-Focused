@@ -47,8 +47,6 @@ SIGNAL_COLOR_MAP = {
 
 # Timeframe mapping: frontend format -> Binance API format
 TIMEFRAME_MAP = {
-    "1m": "1m",
-    "3m": "3m",
     "5m": "5m",
     "10m": "5m",  # Will aggregate two 5m candles
     "15m": "15m",
@@ -59,7 +57,7 @@ TIMEFRAME_MAP = {
     "1d": "1d",
 }
 
-ALLOWED_TIMEFRAMES = {"1m", "3m", "5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d"}
+ALLOWED_TIMEFRAMES = {"5m", "10m", "15m", "30m", "1h", "2h", "4h", "1d"}
 
 
 class MarketDataConsumer(AsyncWebsocketConsumer):
@@ -77,14 +75,14 @@ class MarketDataConsumer(AsyncWebsocketConsumer):
         self.ping_task = None  # Server-side ping task
         self.asset = None
         self.binance_symbol = None
-        self.timeframe = "1m"  # Default timeframe
-        self.binance_interval = "1m"  # Binance API interval
+        self.timeframe = "5m"  # Default timeframe
+        self.binance_interval = "5m"  # Binance API interval
         self.last_pong_time = None  # Track last pong from client
 
     async def connect(self):
         """Accept only supported watchlist assets and timeframes."""
         requested_asset = self.scope["url_route"]["kwargs"].get("symbol", "BTCUSD").upper()
-        requested_timeframe = self.scope["url_route"]["kwargs"].get("timeframe", "1m").lower()
+        requested_timeframe = self.scope["url_route"]["kwargs"].get("timeframe", "5m").lower()
 
         if requested_asset not in ALLOWED_ASSETS:
             logger.warning("Market socket rejected unsupported asset: %s", requested_asset)

@@ -133,7 +133,7 @@ jobs:
                 --agree-tos \
                 --no-eff-email \
                 --non-interactive \
-                # --test-cert
+                --test-cert
               
               if [ $? -eq 0 ]; then
                 echo "✅ SSL certificate obtained successfully!"

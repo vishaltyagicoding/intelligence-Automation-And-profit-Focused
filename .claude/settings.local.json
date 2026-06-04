@@ -1,71 +1,30 @@
 {
   "local_development": {
-    "frontend": {
-      "url": "http://localhost:3000",
-      "port": 3000,
-      "command": "npm run dev"
-    },
-    "backend": {
-      "url": "http://localhost:8000",
-      "port": 8000,
-      "command": "python manage.py runserver 0.0.0.0:8000"
-    },
-    "database": {
-      "host": "localhost",
-      "port": 5432,
-      "name": "neuraltrade",
-      "user": "smartrisk_user"
-    },
-    "redis": {
-      "host": "localhost",
-      "port": 6379
-    },
-    "websocket": {
-      "url": "ws://localhost:8000"
-    }
+    "frontend": { "url": "http://localhost:3000", "command": "npm run dev" },
+    "backend":  { "url": "http://localhost:8000", "command": "python manage.py runserver 0.0.0.0:8000" },
+    "database": { "host": "localhost", "port": 5432, "name": "neuraltrade", "user": "smartrisk_user" },
+    "redis":    { "host": "localhost", "port": 6379 }
   },
-  "docker_local": {
-    "frontend": {
-      "url": "http://localhost:3000",
-      "internal_url": "http://frontend:3000"
-    },
-    "backend": {
-      "url": "http://localhost:8000",
-      "internal_url": "http://django:8000"
-    },
-    "database": {
-      "host": "db",
-      "port": 5432
-    },
-    "redis": {
-      "host": "redis",
-      "port": 6379
-    }
+  "docker_service_names": {
+    "backend": "django",
+    "frontend": "frontend",
+    "database": "db",
+    "redis": "redis",
+    "nginx": "nginx"
   },
   "environment_files": {
     "backend": ".env",
-    "frontend": ".env.local"
+    "frontend": ".env.local",
+    "note": "Use .env NOT .env.production; use docker-compose.yml NOT docker-compose.prod.yml"
   },
   "common_commands": {
-    "start_docker": "docker-compose up -d",
-    "stop_docker": "docker-compose down",
-    "rebuild_docker": "docker-compose up -d --build",
-    "view_logs": "docker-compose logs -f",
-    "django_shell": "docker-compose exec django python manage.py shell",
-    "run_migrations": "docker-compose exec django python manage.py migrate",
-    "create_superuser": "docker-compose exec django python manage.py createsuperuser"
+    "start": "docker-compose up -d",
+    "stop": "docker-compose down",
+    "rebuild": "docker-compose up -d --build",
+    "logs": "docker-compose logs -f django",
+    "migrate": "docker-compose exec django python manage.py migrate",
+    "shell": "docker-compose exec django python manage.py shell",
+    "backfill": "docker-compose exec django python backfill_signals.py"
   },
-  "testing": {
-    "backend": "python manage.py test",
-    "frontend": "npm test",
-    "coverage_backend": "coverage run --source='.' manage.py test && coverage report",
-    "coverage_frontend": "npm test -- --coverage"
-  },
-  "debugging": {
-    "backend_logs": "docker-compose logs -f django",
-    "frontend_logs": "docker-compose logs -f frontend",
-    "database_logs": "docker-compose logs -f db",
-    "redis_logs": "docker-compose logs -f redis",
-    "nginx_logs": "docker-compose logs -f nginx"
-  }
+  "post_deploy_when_sl_target_changed": "sudo docker-compose exec django python backfill_signals.py"
 }

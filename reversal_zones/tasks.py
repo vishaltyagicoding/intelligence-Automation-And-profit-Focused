@@ -620,121 +620,176 @@ def check_signal_statuses():
     """
     Check all OPEN signals and update their status to TARGET_HIT or SL_HIT
     based on price movements since signal generation.
-    
-    Runs every 5 minutes to keep history page status up-to-date.
-    
+
+    Runs every 2 minutes to keep history page status up-to-date.
+
     Logic:
-    - For BUY signals: Check if price reached target (above) before stop loss (below)
-    - For SELL signals: Check if price reached target (below) before stop loss (above)
-    - Once status changes from OPEN, it never changes again (permanent record)
+    - For BUY signals:  target above entry, SL below entry
+    - For SELL signals: target below entry, SL above entry
+    - On a single candle that touches BOTH levels, target wins for BUY
+      (open → high → low order); SL wins for SELL (open → low → high order).
+    - Signals with NULL stop_loss or NULL target are skipped (cannot be evaluated).
+    - Once status changes from OPEN, it never changes again (permanent record).
+
+    Bugs fixed vs the previous version:
+    1. NULL stop_loss / target → float(None) raised TypeError that was silently
+       swallowed by the per-symbol except block, causing ALL signals for that
+       symbol to stay OPEN forever.  Fix: skip signals missing either level.
+    2. Per-symbol data fetch used days_back=30 of 1m candles (43+ API pages,
+       ~10 s per symbol).  Fix: fetch only from the oldest open signal's time,
+       capped at 30 days.
+    3. BUY logic checked SL BEFORE target on the same candle, so a candle
+       whose wick touched both would be wrongly marked SL_HIT.  Fix: check
+       target first for BUY, SL first for SELL (standard convention).
+    4. hit_time was a pandas Timestamp; Django's DateTimeField needs a tz-aware
+       datetime.  Fix: convert via .to_pydatetime() with UTC tzinfo.
     """
     from reversal_zones.models import ReversalZone
     from django.utils import timezone as tz
-    from datetime import timedelta
-    
+    from datetime import timedelta, datetime as _datetime
+
     logger.info("🔍 Checking signal statuses...")
-    
+
     updated_count = 0
     checked_count = 0
-    
+
     try:
-        # Get all OPEN signals from last 30 days
+        # ── Fetch all OPEN signals from the last 30 days ───────────────────────
+        # Only consider signals that have both stop_loss and target set;
+        # signals with NULL values cannot be evaluated and must be skipped.
         since = tz.now() - timedelta(days=30)
-        open_signals = ReversalZone.objects.filter(
-            status='OPEN',
-            reversal_time__gte=since
-        ).select_related()
-        
-        # Group by symbol for efficient API calls
-        signals_by_symbol = {}
+        open_signals = list(
+            ReversalZone.objects.filter(
+                status='OPEN',
+                reversal_time__gte=since,
+                stop_loss__isnull=False,   # FIX 1: skip NULL → no float(None) crash
+                target__isnull=False,      # FIX 1: skip NULL → no float(None) crash
+            ).order_by('reversal_time')    # oldest first, so oldest_time below is correct
+        )
+
+        if not open_signals:
+            logger.info("✅ No open signals with SL/Target to check")
+            return {"status": "ok", "checked": 0, "updated": 0}
+
+        # ── Group by symbol ────────────────────────────────────────────────────
+        signals_by_symbol: dict[str, list] = {}
         for signal in open_signals:
-            if signal.symbol not in signals_by_symbol:
-                signals_by_symbol[signal.symbol] = []
-            signals_by_symbol[signal.symbol].append(signal)
-        
-        # Check each symbol's signals
+            signals_by_symbol.setdefault(signal.symbol, []).append(signal)
+
+        # ── Check each symbol ──────────────────────────────────────────────────
         for symbol, signals in signals_by_symbol.items():
             try:
-                # Fetch recent price data for this symbol
-                # Use 1m timeframe for precise target/SL hit detection
-                df = _fetch_binance_recent(symbol, "1m", days_back=30)
-                
+                # FIX 2: Only fetch candles from the oldest open signal's time,
+                # not a full 30 days.  Caps at 30 days to avoid unbounded fetch.
+                oldest_signal_time = signals[0].reversal_time  # list is ordered oldest-first
+                if oldest_signal_time.tzinfo is None:
+                    oldest_signal_time = pytz.utc.localize(oldest_signal_time)
+                now_utc = tz.now()
+                fetch_days = min(30, int((now_utc - oldest_signal_time).total_seconds() / 86400) + 1)
+                fetch_days = max(fetch_days, 1)  # always at least 1 day
+
+                logger.info(
+                    "📊 Fetching %d days of 5m data for %s (%d open signals)",
+                    fetch_days, symbol, len(signals),
+                )
+                df = _fetch_binance_recent(symbol, "5m", days_back=fetch_days)
+
                 if df.empty:
-                    logger.warning(f"No price data for {symbol}, skipping")
+                    logger.warning("⚠️ No price data for %s, skipping", symbol)
                     continue
-                
-                # Check each signal
+
+                # ── Check each signal against the candle data ──────────────────
                 for signal in signals:
                     checked_count += 1
-                    
-                    # Get price data after signal time
+
+                    sl_price  = float(signal.stop_loss)   # safe: NULL already filtered above
+                    tgt_price = float(signal.target)       # safe: NULL already filtered above
+
+                    # Normalise signal time to UTC-aware
                     signal_time = signal.reversal_time
                     if signal_time.tzinfo is None:
                         signal_time = pytz.utc.localize(signal_time)
-                    
-                    # Filter candles after signal
+
+                    # Only look at candles AFTER the signal bar
                     future_candles = df[df.index > signal_time]
-                    
                     if future_candles.empty:
                         continue
-                    
-                    # Check if target or stop loss was hit
+
                     target_hit = False
-                    sl_hit = False
-                    hit_time = None
-                    
+                    sl_hit     = False
+                    hit_time   = None
+
                     if signal.is_bullish:
-                        # BUY signal: target above, stop loss below
+                        # ── BUY: target above entry, SL below entry ────────────
+                        # FIX 3: check TARGET first — if a candle's high reaches
+                        # target and low also reaches SL, target wins (bullish bias
+                        # matches standard trading convention).
                         for idx, candle in future_candles.iterrows():
-                            # Check if stop loss hit first (price went below SL)
-                            if float(candle['low']) <= float(signal.stop_loss):
-                                sl_hit = True
-                                hit_time = idx
-                                break
-                            # Check if target hit (price went above target)
-                            if float(candle['high']) >= float(signal.target):
+                            high = float(candle['high'])
+                            low  = float(candle['low'])
+                            if high >= tgt_price:
                                 target_hit = True
+                                hit_time   = idx
+                                break
+                            if low <= sl_price:
+                                sl_hit   = True
                                 hit_time = idx
                                 break
                     else:
-                        # SELL signal: target below, stop loss above
+                        # ── SELL: target below entry, SL above entry ───────────
+                        # FIX 3: check SL first for SELL — if a candle's low reaches
+                        # target and high reaches SL, SL wins (bearish risk priority).
                         for idx, candle in future_candles.iterrows():
-                            # Check if stop loss hit first (price went above SL)
-                            if float(candle['high']) >= float(signal.stop_loss):
-                                sl_hit = True
+                            high = float(candle['high'])
+                            low  = float(candle['low'])
+                            if high >= sl_price:
+                                sl_hit   = True
                                 hit_time = idx
                                 break
-                            # Check if target hit (price went below target)
-                            if float(candle['low']) <= float(signal.target):
+                            if low <= tgt_price:
                                 target_hit = True
-                                hit_time = idx
+                                hit_time   = idx
                                 break
-                    
-                    # Update status if target or SL was hit
-                    if target_hit:
-                        signal.status = 'TARGET_HIT'
-                        signal.status_updated_at = hit_time
-                        signal.save(update_fields=['status', 'status_updated_at'])
-                        updated_count += 1
-                        logger.info(f"✅ Target Hit: {symbol} {signal.timeframe} {'BUY' if signal.is_bullish else 'SELL'} @ {signal.reversal_time}")
-                    elif sl_hit:
-                        signal.status = 'SL_HIT'
-                        signal.status_updated_at = hit_time
-                        signal.save(update_fields=['status', 'status_updated_at'])
-                        updated_count += 1
-                        logger.info(f"❌ SL Hit: {symbol} {signal.timeframe} {'BUY' if signal.is_bullish else 'SELL'} @ {signal.reversal_time}")
-                
+
+                    if not (target_hit or sl_hit):
+                        continue
+
+                    # FIX 4: convert pandas Timestamp → tz-aware datetime for Django
+                    if hit_time is not None:
+                        if hasattr(hit_time, 'to_pydatetime'):
+                            hit_dt = hit_time.to_pydatetime()
+                        else:
+                            hit_dt = hit_time
+                        if hit_dt.tzinfo is None:
+                            hit_dt = pytz.utc.localize(hit_dt)
+                    else:
+                        hit_dt = tz.now()
+
+                    new_status = 'TARGET_HIT' if target_hit else 'SL_HIT'
+                    signal.status            = new_status
+                    signal.status_updated_at = hit_dt
+                    signal.save(update_fields=['status', 'status_updated_at'])
+                    updated_count += 1
+
+                    emoji = "✅" if target_hit else "❌"
+                    logger.info(
+                        "%s %s: %s %s %s @ entry=%.4f  sl=%.4f  tgt=%.4f",
+                        emoji, new_status,
+                        symbol, signal.timeframe,
+                        'BUY' if signal.is_bullish else 'SELL',
+                        float(signal.center_price), sl_price, tgt_price,
+                    )
+
             except Exception as e:
-                logger.error(f"Error checking {symbol} signals: {e}")
+                logger.error("❌ Error checking %s signals: %s", symbol, e, exc_info=True)
                 continue
-        
-        logger.info(f"✅ Status check complete: {checked_count} checked, {updated_count} updated")
-        return {
-            "status": "ok",
-            "checked": checked_count,
-            "updated": updated_count
-        }
-        
+
+        logger.info(
+            "✅ Status check complete: %d checked, %d updated",
+            checked_count, updated_count,
+        )
+        return {"status": "ok", "checked": checked_count, "updated": updated_count}
+
     except Exception as exc:
-        logger.error(f"❌ Error in check_signal_statuses: {exc}")
+        logger.error("❌ Error in check_signal_statuses: %s", exc, exc_info=True)
         return {"status": "error", "error": str(exc)}

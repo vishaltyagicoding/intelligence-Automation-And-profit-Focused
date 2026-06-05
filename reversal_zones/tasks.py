@@ -615,8 +615,8 @@ def calculate_reversal_zones_task(symbol, timeframe):
 # ─────────────────────────────────────────────────────────────────────────────
 # TASK 3: Check and update signal statuses (Target Hit / SL Hit)
 # ─────────────────────────────────────────────────────────────────────────────
-@shared_task(max_retries=1, default_retry_delay=30)
-def check_signal_statuses():
+@shared_task(bind=True, max_retries=0)
+def check_signal_statuses(self):
     """
     Check all OPEN signals and update their status to TARGET_HIT or SL_HIT
     based on price movements since signal generation.
@@ -788,8 +788,20 @@ def check_signal_statuses():
             "✅ Status check complete: %d checked, %d updated",
             checked_count, updated_count,
         )
-        return {"status": "ok", "checked": checked_count, "updated": updated_count}
 
     except Exception as exc:
         logger.error("❌ Error in check_signal_statuses: %s", exc, exc_info=True)
-        return {"status": "error", "error": str(exc)}
+
+    finally:
+        # ── SELF-RESCHEDULE every 120 seconds ─────────────────────────────────
+        # This mirrors the update_all_recent_signals pattern.
+        # Works even if celery beat is misconfigured, uses wrong scheduler,
+        # or the periodic task DB entry is missing. Once started, it keeps
+        # running forever — independent of beat entirely.
+        try:
+            check_signal_statuses.apply_async(countdown=120)
+            logger.debug("♻️  check_signal_statuses rescheduled in 120 seconds")
+        except Exception as sched_err:
+            logger.error("Self-reschedule failed: %s", sched_err)
+
+    return {"status": "ok", "checked": checked_count, "updated": updated_count}

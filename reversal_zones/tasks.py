@@ -669,7 +669,6 @@ def check_signal_statuses(self):
 
         if not open_signals:
             logger.info("✅ No open signals with SL/Target to check")
-            return {"status": "ok", "checked": 0, "updated": 0}
 
         # ── Group by symbol ────────────────────────────────────────────────────
         signals_by_symbol: dict[str, list] = {}
@@ -794,14 +793,22 @@ def check_signal_statuses(self):
 
     finally:
         # ── SELF-RESCHEDULE every 120 seconds ─────────────────────────────────
-        # This mirrors the update_all_recent_signals pattern.
-        # Works even if celery beat is misconfigured, uses wrong scheduler,
-        # or the periodic task DB entry is missing. Once started, it keeps
-        # running forever — independent of beat entirely.
-        try:
-            check_signal_statuses.apply_async(countdown=120)
-            logger.debug("♻️  check_signal_statuses rescheduled in 120 seconds")
-        except Exception as sched_err:
-            logger.error("Self-reschedule failed: %s", sched_err)
+        # Mirrors update_all_recent_signals pattern. Runs forever independent
+        # of celery beat, its schedule file, or database periodic task config.
+        # Retry 3 times with 5s delay if Redis is temporarily unavailable.
+        rescheduled = False
+        for attempt in range(3):
+            try:
+                check_signal_statuses.apply_async(countdown=120)
+                logger.info("♻️  check_signal_statuses rescheduled in 120s (attempt %d)", attempt + 1)
+                rescheduled = True
+                break
+            except Exception as sched_err:
+                logger.error("Self-reschedule attempt %d failed: %s", attempt + 1, sched_err)
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(5)
+        if not rescheduled:
+            logger.error("❌ CRITICAL: check_signal_statuses chain is dead — manual restart required")
 
     return {"status": "ok", "checked": checked_count, "updated": updated_count}

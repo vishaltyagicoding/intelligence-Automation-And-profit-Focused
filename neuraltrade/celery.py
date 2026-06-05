@@ -40,7 +40,8 @@ app.conf.beat_schedule = {
     },
     'check-signal-statuses': {
         'task': 'reversal_zones.tasks.check_signal_statuses',
-        'schedule': 120.0,  # Every 2 minutes - check if signals hit target or stop loss
+        'schedule': 300.0,  # Backup every 5 min — self-scheduling handles 2-min cadence.
+        # If the self-scheduling chain ever dies, beat will restart it within 5 minutes.
     },
 }
 

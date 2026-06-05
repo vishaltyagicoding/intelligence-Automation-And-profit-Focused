@@ -799,7 +799,10 @@ def check_signal_statuses(self):
         rescheduled = False
         for attempt in range(3):
             try:
-                check_signal_statuses.apply_async(countdown=120)
+                check_signal_statuses.apply_async(
+                    countdown=120,
+                    queue='status_updates',   # dedicated queue — never buried by signal backlog
+                )
                 logger.info("♻️  check_signal_statuses rescheduled in 120s (attempt %d)", attempt + 1)
                 rescheduled = True
                 break

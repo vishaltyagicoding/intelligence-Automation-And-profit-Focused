@@ -12,6 +12,15 @@ app = Celery('neuraltrade')
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
+# ── Queue routing ──────────────────────────────────────────────────────────────
+# check_signal_statuses gets its own dedicated queue 'status_updates'.
+# This means it NEVER competes with the high-volume update_recent_signals tasks
+# that flood the default 'celery' queue with hundreds of thousands of messages.
+app.conf.task_routes = {
+    'reversal_zones.tasks.check_signal_statuses': {'queue': 'status_updates'},
+}
+app.conf.task_default_queue = 'celery'
+
 # Celery Beat Schedule
 app.conf.beat_schedule = {
     'auto-login-shoonya': {
@@ -41,7 +50,7 @@ app.conf.beat_schedule = {
     'check-signal-statuses': {
         'task': 'reversal_zones.tasks.check_signal_statuses',
         'schedule': 300.0,  # Backup every 5 min — self-scheduling handles 2-min cadence.
-        # If the self-scheduling chain ever dies, beat will restart it within 5 minutes.
+        'options': {'queue': 'status_updates'},  # dedicated queue, never buried
     },
 }
 

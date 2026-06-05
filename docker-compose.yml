@@ -71,7 +71,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: neuraltrade_celery_worker
-    command: celery -A neuraltrade worker -l info --concurrency=4
+    command: celery -A neuraltrade worker -l info --concurrency=4 -Q celery,status_updates
     volumes:
       - .:/app
       - ./models:/app/models

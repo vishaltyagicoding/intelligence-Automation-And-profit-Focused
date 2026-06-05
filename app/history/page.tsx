@@ -80,8 +80,8 @@ export default function SignalHistoryPage() {
         TIMEFRAMES.map(timeframe => ({
           symbol, timeframe,
           p: fetch(
-            `/api/trading/signal-history/${symbol}/?timeframe=${timeframe}`,
-            { signal: AbortSignal.timeout(8000) }
+            `/api/trading/signal-history/${symbol}/?timeframe=${timeframe}&_t=${Date.now()}`,
+            { signal: AbortSignal.timeout(8000), cache: 'no-store' }
           ).then(r => r.ok ? r.json() : null).catch(() => null),
         }))
       );
@@ -219,10 +219,10 @@ export default function SignalHistoryPage() {
     };
   }, [isAuthenticated, connectLiveWS]);
 
-  // Auto-refresh historical data every 60 seconds
+  // Auto-refresh historical data every 30 seconds
   useEffect(() => {
     if (!isAuthenticated) return;
-    const iv = setInterval(fetchAll, 60_000);
+    const iv = setInterval(fetchAll, 30_000);
     return () => clearInterval(iv);
   }, [isAuthenticated, fetchAll]);
 
@@ -440,7 +440,7 @@ export default function SignalHistoryPage() {
             <p><strong className="text-white">Target:</strong> Outer zone top (BUY) or outer zone bottom (SELL) — your profit target</p>
             <p><strong className="text-white">Live Updates:</strong> New signals appear instantly via WebSocket — no page refresh needed</p>
             <p className="mt-4 rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 text-cyan-300">
-              Showing last 5 months · {SYMBOLS.length} assets · {TIMEFRAMES.length} timeframes · Auto-refreshes every 60s
+              Showing last 5 months · {SYMBOLS.length} assets · {TIMEFRAMES.length} timeframes · Auto-refreshes every 30s
             </p>
           </div>
         </div>

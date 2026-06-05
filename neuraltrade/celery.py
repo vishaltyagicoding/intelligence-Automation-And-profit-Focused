@@ -40,7 +40,7 @@ app.conf.beat_schedule = {
     },
     'check-signal-statuses': {
         'task': 'reversal_zones.tasks.check_signal_statuses',
-        'schedule': 300.0,  # Every 5 minutes - check if signals hit target or stop loss
+        'schedule': 120.0,  # Every 2 minutes - check if signals hit target or stop loss
     },
 }
 

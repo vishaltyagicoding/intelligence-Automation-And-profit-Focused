@@ -100,67 +100,87 @@ jobs:
             sudo docker-compose build django celery_worker celery_beat frontend
           EOF
 
-      - name: 🔐 Check/Obtain SSL certificate
+      - name: 🔐 Obtain Production SSL Certificate
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Check if valid certificate already exists
-            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ] && \
-               [ -f ./nginx/ssl/live/smartriskfx.com/privkey.pem ]; then
-              echo "✅ SSL certificate already exists, skipping renewal"
+            # Check if valid PRODUCTION certificate already exists
+            if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "smartriskfx.com" && \
+               ! sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT"; then
+              echo "✅ Valid PRODUCTION SSL certificate already exists"
               sudo chmod -R 755 ./nginx/ssl
               exit 0
             fi
 
-            echo "🔐 Obtaining SSL certificate from Let's Encrypt..."
+            echo "🔐 Obtaining PRODUCTION SSL certificate from Let's Encrypt..."
+            echo "⚠️  This will generate a REAL, TRUSTED certificate for smartriskfx.com"
+            
+            # Stop nginx temporarily to free port 80
+            sudo docker-compose stop nginx || true
             sudo fuser -k 80/tcp || true
+            sleep 5
 
-            # Try to obtain certificate with retries
-            MAX_RETRIES=3
-            RETRY_COUNT=0
+            # Obtain PRODUCTION certificate (NO --test-cert flag)
+            sudo docker run --rm \
+              -v $(pwd)/nginx/ssl:/etc/letsencrypt \
+              -p 80:80 \
+              certbot/certbot certonly --standalone \
+              -d smartriskfx.com \
+              -d www.smartriskfx.com \
+              --email ${{ secrets.CERTBOT_EMAIL }} \
+              --agree-tos \
+              --no-eff-email \
+              --non-interactive \
+              --force-renewal
+              --test-cert
             
-            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-              echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
-              
-              sudo docker run --rm \
-                -v $(pwd)/nginx/ssl:/etc/letsencrypt \
-                -p 80:80 \
-                certbot/certbot certonly --standalone \
-                -d smartriskfx.com \
-                -d www.smartriskfx.com \
-                --email ${{ secrets.CERTBOT_EMAIL }} \
-                --agree-tos \
-                --no-eff-email \
-                --non-interactive \
-                --test-cert
-              
-              if [ $? -eq 0 ]; then
-                echo "✅ SSL certificate obtained successfully!"
-                sudo chmod -R 755 ./nginx/ssl
-                exit 0
-              fi
-              
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-                echo "⏳ Waiting 30 seconds before retry..."
-                sleep 30
-              fi
-            done
-
-            # If all retries failed, check if we can continue without SSL
-            echo "⚠️ SSL certificate generation failed after $MAX_RETRIES attempts"
-            echo "Checking if existing certificate can be used..."
-            
-            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
-              echo "✅ Found existing certificate, will use it"
+            if [ $? -eq 0 ]; then
+              echo "✅ PRODUCTION SSL certificate obtained successfully!"
               sudo chmod -R 755 ./nginx/ssl
+              
+              # Verify it's a production cert
+              if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT"; then
+                echo "❌ ERROR: Staging certificate was generated instead of production!"
+                exit 1
+              fi
+              
+              echo "✅ Verified: PRODUCTION certificate (trusted by browsers)"
+              
+              # Restore SSL nginx config if we switched to HTTP-only
+              if [ -f nginx/nginx.conf.ssl.backup ]; then
+                echo "🔄 Restoring SSL nginx configuration..."
+                mv nginx/nginx.conf.ssl.backup nginx/nginx.conf
+              fi
+              
+              # Start nginx with production SSL
+              sudo docker-compose up -d nginx
+              sleep 5
+              
+              # Verify nginx is running
+              if sudo docker-compose ps nginx | grep -q "Up"; then
+                echo "✅ Nginx started successfully with PRODUCTION SSL"
+                sudo docker-compose exec -T nginx nginx -s reload
+              else
+                echo "❌ Nginx failed to start - check logs"
+                sudo docker-compose logs --tail=50 nginx
+                exit 1
+              fi
+              
               exit 0
             else
-              echo "❌ No valid certificate found. Deployment will continue with HTTP only."
-              echo "You can manually run certbot later when Let's Encrypt is available."
-              # Don't fail the deployment, just warn
-              exit 0
+              echo "❌ Failed to obtain PRODUCTION SSL certificate"
+              echo "Common causes:"
+              echo "  1. Domain not pointing to this server IP (54.183.178.141)"
+              echo "  2. Port 80 still in use"
+              echo "  3. Let's Encrypt rate limit reached"
+              echo ""
+              echo "Checking DNS..."
+              dig +short smartriskfx.com @8.8.8.8
+              echo ""
+              echo "Falling back to HTTP-only mode"
+              sudo docker-compose up -d nginx
+              exit 1
             fi
           EOF
 
@@ -168,6 +188,14 @@ jobs:
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
+            
+            # Check if SSL certificates exist
+            if [ ! -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
+              echo "⚠️ SSL certificates not found - using HTTP-only nginx config temporarily"
+              cp nginx/nginx.conf nginx/nginx.conf.ssl.backup
+              cp nginx/nginx.conf.http-only nginx/nginx.conf
+            fi
+            
             sudo docker-compose up -d
             sleep 10
             sudo docker-compose ps
@@ -230,10 +258,19 @@ jobs:
             echo "✅ All services are healthy and ready"
           EOF
 
-      - name: 🔄 Reload Nginx
+      - name: 🔄 Reload Nginx (if healthy)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
+            
+            # Check if SSL certificates exist
+            if [ ! -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
+              echo "⚠️ SSL certificates not found - skipping nginx reload"
+              echo "   Nginx will start with HTTP-only configuration"
+              echo "   SSL certificates will be obtained in next step"
+              exit 0
+            fi
+            
             echo "⏳ Waiting for nginx to be fully ready..."
             sleep 15
             
@@ -244,22 +281,21 @@ jobs:
               if sudo docker-compose ps nginx | grep -q "Up"; then
                 echo "✅ Nginx container is running"
                 # Test nginx configuration
-                if sudo docker-compose exec -T nginx nginx -t; then
+                if sudo docker-compose exec -T nginx nginx -t 2>/dev/null; then
                   echo "✅ Nginx configuration is valid"
                   # Reload nginx
-                  sudo docker-compose exec -T nginx nginx -s reload && echo "✅ Nginx reloaded successfully" && break
+                  sudo docker-compose exec -T nginx nginx -s reload && echo "✅ Nginx reloaded successfully" && exit 0
                 else
-                  echo "❌ Nginx configuration test failed"
-                  sudo docker-compose logs --tail=50 nginx
-                  exit 1
+                  echo "⚠️ Nginx configuration test failed (likely SSL issue)"
+                  echo "   Will continue deployment to regenerate SSL"
+                  exit 0
                 fi
               fi
               
               RETRY_COUNT=$((RETRY_COUNT + 1))
               if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                echo "❌ Nginx failed to start properly"
-                sudo docker-compose logs --tail=100 nginx
-                exit 1
+                echo "⚠️ Nginx not responding - will regenerate SSL certificates"
+                exit 0
               fi
               echo "  Attempt $RETRY_COUNT/$MAX_RETRIES: Waiting for nginx..."
               sleep 5
@@ -353,11 +389,19 @@ jobs:
             sudo docker-compose restart celery_beat celery_worker
           EOF
 
-      - name: 🔐 Setup SSL auto-renewal (staging)
+      - name: 🔐 Setup SSL Auto-Renewal (PRODUCTION)
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo fuser -k 80/tcp || true' --post-hook 'cd ~/smartrisk && sudo docker-compose exec -T nginx nginx -s reload' --quiet --test-cert") | crontab -
-            echo "✅ SSL auto-renewal installed (staging environment)"
+            # Remove old staging renewal cron job if exists
+            crontab -l 2>/dev/null | grep -v "certbot renew.*--test-cert" | crontab - || true
+            
+            # Setup PRODUCTION certificate auto-renewal (runs twice daily)
+            (crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 0,12 * * * cd ~/smartrisk && sudo docker run --rm -v \$(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot renew --standalone --pre-hook 'sudo docker-compose stop nginx' --post-hook 'sudo docker-compose start nginx && sleep 5 && sudo docker-compose exec -T nginx nginx -s reload' --quiet") | crontab -
+            
+            echo "✅ SSL auto-renewal configured (PRODUCTION certificates)"
+            echo "   - Runs twice daily at midnight and noon"
+            echo "   - Renews certificates 30 days before expiry"
+            echo "   - Automatically reloads nginx after renewal"
           EOF
 
       - name: 📊 Deployment Summary

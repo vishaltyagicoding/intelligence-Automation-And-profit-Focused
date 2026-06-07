@@ -177,18 +177,57 @@ jobs:
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
-            for i in {1..60}; do
-              if sudo docker-compose ps db | grep -q "healthy"; then echo "✅ DB ready"; break; fi
+            echo "⏳ Waiting for database to be healthy..."
+            for i in {1..90}; do
+              if sudo docker-compose ps db | grep -q "healthy"; then 
+                echo "✅ DB ready after $i attempts"
+                break
+              fi
+              if [ $i -eq 90 ]; then
+                echo "❌ DB failed to become healthy"
+                sudo docker-compose logs --tail=50 db
+                exit 1
+              fi
               sleep 5
             done
+            
+            echo "⏳ Waiting for Redis to be healthy..."
             for i in {1..30}; do
-              if sudo docker-compose ps redis | grep -q "healthy"; then echo "✅ Redis ready"; break; fi
+              if sudo docker-compose ps redis | grep -q "healthy"; then 
+                echo "✅ Redis ready after $i attempts"
+                break
+              fi
+              if [ $i -eq 30 ]; then
+                echo "❌ Redis failed to become healthy"
+                sudo docker-compose logs --tail=50 redis
+                exit 1
+              fi
               sleep 2
             done
-            for i in {1..60}; do
-              if sudo docker-compose ps django | grep -q "healthy"; then echo "✅ Django ready"; break; fi
+            
+            echo "⏳ Waiting for Django to be healthy..."
+            for i in {1..120}; do
+              STATUS=$(sudo docker-compose ps django --format json | jq -r '.Health' 2>/dev/null || echo "unknown")
+              if echo "$STATUS" | grep -q "healthy"; then
+                echo "✅ Django ready after $i attempts"
+                break
+              fi
+              # Check if container is actually running
+              if ! sudo docker-compose ps django | grep -q "Up"; then
+                echo "❌ Django container is not running"
+                sudo docker-compose logs --tail=100 django
+                exit 1
+              fi
+              if [ $i -eq 120 ]; then
+                echo "❌ Django failed to become healthy after 10 minutes"
+                sudo docker-compose logs --tail=100 django
+                exit 1
+              fi
+              echo "  Attempt $i/120: Django status = $STATUS"
               sleep 5
             done
+            
+            echo "✅ All services are healthy and ready"
           EOF
 
       - name: 🔄 Reload Nginx

@@ -230,18 +230,12 @@ jobs:
             echo "✅ All services are healthy and ready"
           EOF
 
-      - name: 🔄 Reload Nginx
-        run: |
-          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            cd ~/smartrisk
-            sudo docker-compose exec -T nginx nginx -t
-            sudo docker-compose exec -T nginx nginx -s reload
-          EOF
-
       - name: 🗄️ Run database migrations
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
+            # Wait a bit more for Django to be fully ready
+            sleep 10
             sudo docker-compose exec -T django python manage.py migrate --noinput
           EOF
 

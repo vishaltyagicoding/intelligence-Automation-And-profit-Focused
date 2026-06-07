@@ -230,12 +230,46 @@ jobs:
             echo "✅ All services are healthy and ready"
           EOF
 
+      - name: 🔄 Reload Nginx
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+            echo "⏳ Waiting for nginx to be fully ready..."
+            sleep 15
+            
+            # Check if nginx container is running and healthy
+            MAX_RETRIES=12
+            RETRY_COUNT=0
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if sudo docker-compose ps nginx | grep -q "Up"; then
+                echo "✅ Nginx container is running"
+                # Test nginx configuration
+                if sudo docker-compose exec -T nginx nginx -t; then
+                  echo "✅ Nginx configuration is valid"
+                  # Reload nginx
+                  sudo docker-compose exec -T nginx nginx -s reload && echo "✅ Nginx reloaded successfully" && break
+                else
+                  echo "❌ Nginx configuration test failed"
+                  sudo docker-compose logs --tail=50 nginx
+                  exit 1
+                fi
+              fi
+              
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                echo "❌ Nginx failed to start properly"
+                sudo docker-compose logs --tail=100 nginx
+                exit 1
+              fi
+              echo "  Attempt $RETRY_COUNT/$MAX_RETRIES: Waiting for nginx..."
+              sleep 5
+            done
+          EOF
+
       - name: 🗄️ Run database migrations
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
-            # Wait a bit more for Django to be fully ready
-            sleep 10
             sudo docker-compose exec -T django python manage.py migrate --noinput
           EOF
 

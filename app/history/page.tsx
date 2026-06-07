@@ -89,7 +89,7 @@ export default function SignalHistoryPage() {
           p: fetch(
             `/api/trading/signal-history/${symbol}/?timeframe=${timeframe}&_t=${Date.now()}`,
             { 
-              signal: AbortSignal.timeout(20000),  // Increased from 10s to 20s for XAUUSD
+              signal: AbortSignal.timeout(15000),  // 15s timeout for 15 days of data
               cache: 'no-store',
               headers: {
                 'Accept': 'application/json',
@@ -203,11 +203,11 @@ export default function SignalHistoryPage() {
     }
   }, [isAuthenticated, loading, fetchAll]);
 
-  // Auto-refresh every 30 seconds — picks up new signals and status changes
+  // Auto-refresh every 2 minutes — picks up new signals and status changes
   // (TARGET_HIT / SL_HIT) written by the Celery task automatically.
   useEffect(() => {
     if (!isAuthenticated) return;
-    const iv = setInterval(fetchAll, 30_000);
+    const iv = setInterval(fetchAll, 120_000);  // 2 minutes = 120,000ms
     return () => clearInterval(iv);
   }, [isAuthenticated, fetchAll]);
 
@@ -296,7 +296,7 @@ export default function SignalHistoryPage() {
         <div className="mx-auto max-w-7xl px-6 py-8 flex items-start justify-between">
           <div>
             <h1 className="mb-2 text-3xl font-bold text-white">SmartRisk Signal History</h1>
-            <p className="text-slate-400">Last 5 months — all assets and timeframes — auto-refreshes every 30s</p>
+            <p className="text-slate-400">Last 15 days — all assets and timeframes — auto-refreshes every 2 minutes</p>
             {apiErrors > 0 && (
               <div className="mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-2 text-sm text-amber-300">
                 ⚠️ {apiErrors} API request{apiErrors > 1 ? 's' : ''} failed. Signal count may be incomplete. Retrying automatically...
@@ -423,10 +423,10 @@ export default function SignalHistoryPage() {
             <p><strong className="text-white">Entry Price:</strong> Center price of the reversal zone when signal fired</p>
             <p><strong className="text-white">Stop Loss:</strong> Outer zone bottom (BUY) or outer zone top (SELL) — your risk boundary</p>
             <p><strong className="text-white">Target:</strong> Outer zone top (BUY) or outer zone bottom (SELL) — your profit target</p>
-            <p><strong className="text-white">Auto-refresh:</strong> Signal statuses update automatically every 30 seconds — no page refresh needed</p>
+            <p><strong className="text-white">Auto-refresh:</strong> Signal statuses update automatically every 2 minutes — no page refresh needed</p>
             <p><strong className="text-white">Signal Count:</strong> Total signals shown reflects ONLY successful database queries. Count is stable and accurate.</p>
             <p className="mt-4 rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 text-cyan-300">
-              Showing last 5 months · {SYMBOLS.length} assets · {TIMEFRAMES.length} timeframes · Auto-refreshes every 30s
+              Showing last 15 days · {SYMBOLS.length} assets · {TIMEFRAMES.length} timeframes · Auto-refreshes every 2 minutes
             </p>
           </div>
         </div>

@@ -30,8 +30,15 @@ class ReversalZone(models.Model):
         db_table = 'reversal_zones'
         ordering = ['-reversal_time']
         indexes = [
-            models.Index(fields=['symbol', 'timeframe', '-reversal_time']),
-            models.Index(fields=['symbol', 'is_bullish']),
+            # Composite index for history API queries (CRITICAL for performance)
+            models.Index(fields=['symbol', 'timeframe', '-reversal_time'], name='idx_symbol_tf_time'),
+            # Individual indexes for filtering
+            models.Index(fields=['symbol'], name='idx_symbol'),
+            models.Index(fields=['timeframe'], name='idx_timeframe'),
+            models.Index(fields=['reversal_time'], name='idx_reversal_time'),
+            models.Index(fields=['is_bullish'], name='idx_is_bullish'),
+            # Composite for signal type filtering
+            models.Index(fields=['symbol', 'is_bullish'], name='idx_symbol_bull'),
         ]
         unique_together = [['symbol', 'timeframe', 'reversal_time']]
 

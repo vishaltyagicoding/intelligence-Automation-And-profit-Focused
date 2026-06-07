@@ -423,18 +423,16 @@ def get_signal_history(request, symbol):
         db_symbol = sym_upper
 
     try:
-        # Fetch all records from last 5 months (matches history page window)
-        since = timezone.now() - timedelta(days=150)
+        # Fetch records from last 15 days for history page
+        since = timezone.now() - timedelta(days=15)
         
-        # Optimize query: only fetch fields we need, use iterator for large results
+        # Optimized query: uses composite index (symbol, timeframe, reversal_time)
+        # Removed .only() as it causes N+1 query issues with many fields
+        # PostgreSQL with proper indexes is faster with SELECT * than multiple queries
         records = ReversalZone.objects.filter(
             symbol=db_symbol,
             timeframe=timeframe,
             reversal_time__gte=since,
-        ).only(
-            'bar_index', 'is_bullish', 'center_price', 'stop_loss', 'target',
-            'outer_top', 'outer_bottom', 'core_top', 'core_bottom',
-            'label_text', 'reversal_time', 'status'
         ).order_by('reversal_time')
 
         # NO FILTERING - return all signals exactly as calculator generated them

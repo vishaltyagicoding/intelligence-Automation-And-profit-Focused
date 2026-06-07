@@ -1,5 +1,5 @@
-# final code for test delpoy-aws.yml file without 5 attempt you can push many times
- 
+# final code for test deploy-aws.yml file without 5 attempt you can push many times
+
 name: Deploy SmartRisk to AWS EC2
 
 on:
@@ -131,9 +131,7 @@ jobs:
               --email ${{ secrets.CERTBOT_EMAIL }} \
               --agree-tos \
               --no-eff-email \
-              --non-interactive \
-              --force-renewal
-              --test-cert
+              --non-interactive
             
             if [ $? -eq 0 ]; then
               echo "✅ PRODUCTION SSL certificate obtained successfully!"
@@ -171,7 +169,7 @@ jobs:
             else
               echo "❌ Failed to obtain PRODUCTION SSL certificate"
               echo "Common causes:"
-              echo "  1. Domain not pointing to this server IP (54.183.178.141)"
+              echo "  1. Domain not pointing to this server IP (13.250.19.107)"
               echo "  2. Port 80 still in use"
               echo "  3. Let's Encrypt rate limit reached"
               echo ""
@@ -422,7 +420,7 @@ jobs:
             echo "✅ DEPLOYMENT SUCCESSFUL!"
             echo "=========================================================================="
             echo "🌐 Website: https://smartriskfx.com"
-            echo "� Landing Page: https://smartriskfx.com/join"
+            echo "🔒 Landing Page: https://smartriskfx.com/join"
             echo "🔒 SSL Status: $SSL_STATUS ($CERT_TYPE)"
             echo "🐳 Docker Services:"
             sudo docker-compose ps --format "table {{.Service}}\t{{.Status}}"

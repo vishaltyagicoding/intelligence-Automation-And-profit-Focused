@@ -149,7 +149,7 @@ def get_reversal_zones(request, symbol):
     timeframe = request.GET.get('timeframe', '4h')
 
     TF_MAP = {
-        '1m': '1m', '3m': '3m', '5m': '5m', '10m': '5m',
+        '5m': '5m', '10m': '5m',
         '15m': '15m', '30m': '30m', '1h': '1h', '2h': '2h',
         '4h': '4h', '1d': '1d',
     }
@@ -478,9 +478,6 @@ def get_signal_history(request, symbol):
             'count':     len(signals),
             'signals':   signals,
         })
-        # Never let browsers, Nginx, or CDNs cache signal-history responses.
-        # Status fields (OPEN → TARGET_HIT / SL_HIT) change over time and must
-        # always be read fresh from DB.
         response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response['Pragma'] = 'no-cache'
         return response
@@ -507,7 +504,7 @@ def trigger_history_calculation(request, symbol):
         calculate_all_history.apply_async()
         return Response({'success': True, 'message': 'Queued full history calculation for all symbols'})
 
-    timeframes = request.data.get('timeframes', ["1m","3m","5m","10m","15m","30m","1h","2h","4h","1d"])
+    timeframes = request.data.get('timeframes', ["5m","10m","15m","30m","1h","2h","4h","1d"])
     sym_upper  = symbol.upper()
 
     for tf in timeframes:

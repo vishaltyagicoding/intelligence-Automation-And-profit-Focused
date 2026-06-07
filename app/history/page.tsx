@@ -113,10 +113,31 @@ export default function SignalHistoryPage() {
         });
       });
 
-      // Merge with any live signals already received via WebSocket
-      for (const [k, v] of signalsRef.current) fresh.set(k, v);
+      // Merge ONLY live WS signals that are genuinely NEW (not yet in DB).
+      // A live signal is "new" if its timestamp is strictly after the most
+      // recent DB signal for that same symbol+timeframe combo.
+      // This prevents stale WS entries from inflating the count after a refresh.
+      const latestDbTs = new Map<string, number>();
+      for (const sig of fresh.values()) {
+        const key = `${sig.symbol}-${sig.timeframe}`;
+        const t   = new Date(sig.timestamp).getTime();
+        if (!latestDbTs.has(key) || t > latestDbTs.get(key)!) {
+          latestDbTs.set(key, t);
+        }
+      }
+      for (const [k, v] of signalsRef.current) {
+        if (!k.endsWith('-live')) continue;   // skip non-live entries
+        const key    = `${v.symbol}-${v.timeframe}`;
+        const wsTime = new Date(v.timestamp).getTime();
+        const dbTime = latestDbTs.get(key) ?? 0;
+        if (wsTime > dbTime) {
+          fresh.set(k, v);   // genuinely new live signal — keep it
+        }
+        // else: DB already has this signal or newer → drop from ref
+      }
 
-      signalsRef.current = fresh;
+      // Prune signalsRef so it only contains what's in fresh (prevents unbounded growth)
+      signalsRef.current = new Map(fresh);
       setSignals(
         [...fresh.values()].sort(
           (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()

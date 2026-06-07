@@ -97,7 +97,7 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD', 'postgres'),
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
-        'CONN_MAX_AGE': 600,
+        'CONN_MAX_AGE': 60,  # Reduced from 600 to 60 seconds for faster connection recycling
         'OPTIONS': {
             'connect_timeout': 10,
         }

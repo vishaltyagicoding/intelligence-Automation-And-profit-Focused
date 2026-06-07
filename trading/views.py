@@ -408,6 +408,7 @@ def get_signal_history(request, symbol):
     """
     from reversal_zones.models import ReversalZone
     from datetime import timedelta
+    from django.db import connection
 
     timeframe = request.GET.get('timeframe', '4h')
 
@@ -476,6 +477,9 @@ def get_signal_history(request, symbol):
                 logger.warning(f"⚠️ Skipping malformed record for {db_symbol} {timeframe}: {record_error}")
                 continue
 
+        # Explicitly close DB connection to prevent pool exhaustion
+        connection.close()
+
         response = Response({
             'success':   True,
             'symbol':    db_symbol,
@@ -488,6 +492,12 @@ def get_signal_history(request, symbol):
         return response
 
     except Exception as e:
+        # Close connection even on error
+        try:
+            connection.close()
+        except:
+            pass
+        
         logger.error(f"❌ Error fetching signal history for {symbol} {timeframe}: {e}", exc_info=True)
         # Return empty result instead of 500 error to prevent fluctuating counts
         return Response({

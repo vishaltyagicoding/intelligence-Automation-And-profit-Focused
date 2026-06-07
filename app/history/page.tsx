@@ -89,7 +89,7 @@ export default function SignalHistoryPage() {
           p: fetch(
             `/api/trading/signal-history/${symbol}/?timeframe=${timeframe}&_t=${Date.now()}`,
             { 
-              signal: AbortSignal.timeout(10000), 
+              signal: AbortSignal.timeout(20000),  // Increased from 10s to 20s for XAUUSD
               cache: 'no-store',
               headers: {
                 'Accept': 'application/json',
@@ -104,7 +104,12 @@ export default function SignalHistoryPage() {
             return r.json();
           })
           .catch(err => {
-            console.error(`❌ Fetch error for ${symbol} ${timeframe}:`, err);
+            // Don't log AbortError for user-initiated refreshes
+            if (err.name !== 'AbortError') {
+              console.error(`❌ Fetch error for ${symbol} ${timeframe}:`, err);
+            } else {
+              console.warn(`⏱️ Timeout for ${symbol} ${timeframe} (query took > 20s)`);
+            }
             return null;
           }),
         }))

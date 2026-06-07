@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/AuthContext';
-import { getWebSocketUrl } from '@/lib/config';
 
 interface SignalHistory {
   id: string;
@@ -52,10 +51,11 @@ export default function SignalHistoryPage() {
   const [lastUpdated,   setLastUpdated]   = useState<Date | null>(null);
   const [filter,        setFilter]        = useState<FilterType>('ALL');
   const [symbolFilter,  setSymbolFilter]  = useState<'ALL' | SymbolType>('ALL');
-  const [liveCount,     setLiveCount]     = useState(0);  // count of live WS signals received
 
-  const wsRefs = useRef<WebSocket[]>([]);
-  const signalsRef = useRef<Map<string, SignalHistory>>(new Map());
+  // Guard: prevents multiple concurrent fetchAll() calls from racing each other.
+  // Without this, 30s timer + tab-focus + manual refresh can all fire at once,
+  // causing the signal count to flicker as each resolves with a different snapshot.
+  const fetchInProgress = useRef(false);
 
   // Protect route
   useEffect(() => {
@@ -72,8 +72,14 @@ export default function SignalHistoryPage() {
   }, [isAuthenticated, loading, user, router]);
 
   // ── Fetch ALL historical signals in parallel ───────────────────────────────
+  // fetchInProgress guard ensures only ONE fetch runs at a time.
+  // Without this, the 30s timer, tab-focus, and manual refresh button can all
+  // fire simultaneously, causing the signal count to flicker as each resolves
+  // at a different moment with a different snapshot from the server.
   const fetchAll = useCallback(async () => {
     if (!isAuthenticated) return;
+    if (fetchInProgress.current) return;   // ← debounce: drop concurrent calls
+    fetchInProgress.current = true;
     setLoadingData(true);
     try {
       const tasks = SYMBOLS.flatMap(symbol =>
@@ -97,9 +103,6 @@ export default function SignalHistoryPage() {
           const id   = `${symbol}-${timeframe}-${ts}-${idx}`;
           const oTop = s.outer_top as number;
           const oBot = s.outer_bottom as number;
-          // Use the explicitly calculated stop_loss / target returned by the API.
-          // For XAUUSD (PAXG) and all other assets, these are derived from the
-          // actual entry (confirmation-candle close), not from outer_top/bottom.
           const apiSl  = (s.stop_loss  as number) ?? (bull ? oBot : oTop);
           const apiTgt = (s.target     as number) ?? (bull ? oTop : oBot);
           fresh.set(id, {
@@ -113,31 +116,10 @@ export default function SignalHistoryPage() {
         });
       });
 
-      // Merge ONLY live WS signals that are genuinely NEW (not yet in DB).
-      // A live signal is "new" if its timestamp is strictly after the most
-      // recent DB signal for that same symbol+timeframe combo.
-      // This prevents stale WS entries from inflating the count after a refresh.
-      const latestDbTs = new Map<string, number>();
-      for (const sig of fresh.values()) {
-        const key = `${sig.symbol}-${sig.timeframe}`;
-        const t   = new Date(sig.timestamp).getTime();
-        if (!latestDbTs.has(key) || t > latestDbTs.get(key)!) {
-          latestDbTs.set(key, t);
-        }
-      }
-      for (const [k, v] of signalsRef.current) {
-        if (!k.endsWith('-live')) continue;   // skip non-live entries
-        const key    = `${v.symbol}-${v.timeframe}`;
-        const wsTime = new Date(v.timestamp).getTime();
-        const dbTime = latestDbTs.get(key) ?? 0;
-        if (wsTime > dbTime) {
-          fresh.set(k, v);   // genuinely new live signal — keep it
-        }
-        // else: DB already has this signal or newer → drop from ref
-      }
-
-      // Prune signalsRef so it only contains what's in fresh (prevents unbounded growth)
-      signalsRef.current = new Map(fresh);
+      // Set signals directly from DB — no WebSocket merging.
+      // The DB is the single source of truth for the history page.
+      // check_signal_statuses Celery task updates statuses every 2 minutes.
+      // The 30s auto-refresh below picks up those updates automatically.
       setSignals(
         [...fresh.values()].sort(
           (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -148,80 +130,9 @@ export default function SignalHistoryPage() {
       console.error('History fetch error:', e);
     } finally {
       setLoadingData(false);
+      fetchInProgress.current = false;   // ← release guard
     }
   }, [isAuthenticated]);
-
-  // ── Connect WebSocket for each symbol+timeframe to get INSTANT updates ────
-  // When a new signal fires on the live chart it broadcasts a 'signal' event.
-  // We intercept it here, prepend the new row immediately for instant UI update,
-  // then trigger a full fetchAll() so ALL historical rows are also refreshed.
-  const connectLiveWS = useCallback(() => {
-    if (!isAuthenticated) return;
-
-    // Close any existing connections first
-    wsRefs.current.forEach(ws => ws.close());
-    wsRefs.current = [];
-
-    const wsBase = getWebSocketUrl();
-
-    SYMBOLS.forEach(symbol => {
-      TIMEFRAMES.forEach(timeframe => {
-        const url = `${wsBase}/ws/market/${symbol}/${timeframe}/`;
-        const ws  = new WebSocket(url);
-
-        ws.onmessage = (ev) => {
-          try {
-            const data = JSON.parse(ev.data as string) as Record<string, unknown>;
-
-            // Only handle signal events (not kline tick updates)
-            if (data.type !== 'signal') return;
-
-            const bull    = data.is_bullish as boolean;
-            const ts      = data.timestamp as string;
-            const asset   = data.asset as string;
-            const tf      = data.timeframe as string;
-            const entry   = data.price as number;
-            const sl      = data.stop_loss as number;
-            const tgt     = data.target as number;
-            const id      = `${asset}-${tf}-${ts}-live`;
-
-            const newSig: SignalHistory = {
-              id, timestamp: ts, symbol: asset, timeframe: tf,
-              action:     bull ? 'BUY' : 'SELL',
-              entryPrice: entry,
-              stopLoss:   sl   ?? null,
-              target:     tgt  ?? null,
-              status:     'OPEN',
-            };
-
-            signalsRef.current.set(id, newSig);
-
-            // Step 1: Prepend new signal to top of list INSTANTLY — no delay
-            setSignals(prev => {
-              const exists = prev.find(s => s.id === id);
-              if (exists) return prev;
-              return [newSig, ...prev];
-            });
-            setLiveCount(c => c + 1);
-            setLastUpdated(new Date());
-
-            // Step 2: Trigger full refresh of ALL historical data from the DB.
-            // This ensures Date & Time, Symbol, Timeframe, Action, Entry Price,
-            // Stop Loss, Target and Status are all up-to-date across every row.
-            // Small delay lets the backend finish writing to DB first.
-            setTimeout(() => {
-              fetchAll();
-            }, 2000);
-          } catch { /* ignore parse errors */ }
-        };
-
-        ws.onerror   = () => {};  // silent — expected for closed streams
-        ws.onclose   = () => {};
-
-        wsRefs.current.push(ws);
-      });
-    });
-  }, [isAuthenticated, fetchAll]);
 
   // Initial fetch
   useEffect(() => {
@@ -230,24 +141,15 @@ export default function SignalHistoryPage() {
     }
   }, [isAuthenticated, loading, fetchAll]);
 
-  // Connect live WebSocket after initial data loads
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    connectLiveWS();
-    return () => {
-      wsRefs.current.forEach(ws => ws.close());
-      wsRefs.current = [];
-    };
-  }, [isAuthenticated, connectLiveWS]);
-
-  // Auto-refresh historical data every 30 seconds
+  // Auto-refresh every 30 seconds — picks up new signals and status changes
+  // (TARGET_HIT / SL_HIT) written by the Celery task automatically.
   useEffect(() => {
     if (!isAuthenticated) return;
     const iv = setInterval(fetchAll, 30_000);
     return () => clearInterval(iv);
   }, [isAuthenticated, fetchAll]);
 
-  // Refresh on tab focus
+  // Refresh on tab focus (user switches back to this tab)
   useEffect(() => {
     if (!isAuthenticated) return;
     const onFocus = () => fetchAll();
@@ -312,11 +214,6 @@ export default function SignalHistoryPage() {
               <span className="text-xl font-bold text-white">SmartRisk</span>
             </Link>
             <div className="flex items-center gap-4">
-              {liveCount > 0 && (
-                <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-400 animate-pulse">
-                  ● {liveCount} live update{liveCount !== 1 ? 's' : ''}
-                </span>
-              )}
               <button
                 onClick={fetchAll}
                 disabled={loadingData}
@@ -337,7 +234,7 @@ export default function SignalHistoryPage() {
         <div className="mx-auto max-w-7xl px-6 py-8 flex items-start justify-between">
           <div>
             <h1 className="mb-2 text-3xl font-bold text-white">SmartRisk Signal History</h1>
-            <p className="text-slate-400">Last 5 months — all assets and timeframes — live updates via WebSocket</p>
+            <p className="text-slate-400">Last 5 months — all assets and timeframes — auto-refreshes every 30s</p>
           </div>
           {lastUpdated && (
             <p className="text-xs text-slate-500 mt-1 whitespace-nowrap">
@@ -459,7 +356,7 @@ export default function SignalHistoryPage() {
             <p><strong className="text-white">Entry Price:</strong> Center price of the reversal zone when signal fired</p>
             <p><strong className="text-white">Stop Loss:</strong> Outer zone bottom (BUY) or outer zone top (SELL) — your risk boundary</p>
             <p><strong className="text-white">Target:</strong> Outer zone top (BUY) or outer zone bottom (SELL) — your profit target</p>
-            <p><strong className="text-white">Live Updates:</strong> New signals appear instantly via WebSocket — no page refresh needed</p>
+            <p><strong className="text-white">Auto-refresh:</strong> Signal statuses update automatically every 30 seconds — no page refresh needed</p>
             <p className="mt-4 rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 text-cyan-300">
               Showing last 5 months · {SYMBOLS.length} assets · {TIMEFRAMES.length} timeframes · Auto-refreshes every 30s
             </p>

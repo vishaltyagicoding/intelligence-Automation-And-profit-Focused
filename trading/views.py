@@ -407,7 +407,7 @@ def get_signal_history(request, symbol):
     GET /api/trading/signal-history/BTCUSD/?timeframe=1m
     """
     from reversal_zones.models import ReversalZone
-    from django.utils import timezone as tz
+    from datetime import timedelta
 
     timeframe = request.GET.get('timeframe', '4h')
 
@@ -423,7 +423,7 @@ def get_signal_history(request, symbol):
 
     try:
         # Fetch all records from last 5 months (matches history page window)
-        since = tz.now() - datetime.timedelta(days=150)
+        since = timezone.now() - timedelta(days=150)
         records = ReversalZone.objects.filter(
             symbol=db_symbol,
             timeframe=timeframe,
@@ -435,41 +435,46 @@ def get_signal_history(request, symbol):
         # Any additional filtering would cause mismatch with TradingView
         signals = []
         for rec in records:
-            is_bull   = rec.is_bullish
-            entry     = round(float(rec.center_price), 2)
-            outer_top = round(float(rec.outer_top),    2)
-            outer_bot = round(float(rec.outer_bottom), 2)
-            core_top  = round(float(rec.core_top),     2)
-            core_bot  = round(float(rec.core_bottom),  2)
+            try:
+                is_bull   = rec.is_bullish
+                entry     = round(float(rec.center_price), 2)
+                outer_top = round(float(rec.outer_top),    2)
+                outer_bot = round(float(rec.outer_bottom), 2)
+                core_top  = round(float(rec.core_top),     2)
+                core_bot  = round(float(rec.core_bottom),  2)
 
-            # NEW: Use the dedicated stop_loss and target fields if available
-            # This ensures history API shows the universal calculation values
-            if rec.stop_loss and rec.target:
-                stop_loss = round(float(rec.stop_loss), 2)
-                target    = round(float(rec.target), 2)
-            else:
-                # Fallback to outer_top/outer_bottom for old records
-                if is_bull:
-                    stop_loss = outer_bot
-                    target    = outer_top
+                # NEW: Use the dedicated stop_loss and target fields if available
+                # This ensures history API shows the universal calculation values
+                if rec.stop_loss and rec.target:
+                    stop_loss = round(float(rec.stop_loss), 2)
+                    target    = round(float(rec.target), 2)
                 else:
-                    stop_loss = outer_top
-                    target    = outer_bot
+                    # Fallback to outer_top/outer_bottom for old records
+                    if is_bull:
+                        stop_loss = outer_bot
+                        target    = outer_top
+                    else:
+                        stop_loss = outer_top
+                        target    = outer_bot
 
-            signals.append({
-                'bar_index':    rec.bar_index,
-                'is_bullish':   is_bull,
-                'center_price': entry,
-                'stop_loss':    stop_loss,
-                'target':       target,
-                'outer_top':    outer_top,
-                'outer_bottom': outer_bot,
-                'core_top':     core_top,
-                'core_bottom':  core_bot,
-                'label':        rec.label_text,
-                'timestamp':    rec.reversal_time.isoformat(),
-                'status':       rec.status,  # NEW: Include status for history page
-            })
+                signals.append({
+                    'bar_index':    rec.bar_index,
+                    'is_bullish':   is_bull,
+                    'center_price': entry,
+                    'stop_loss':    stop_loss,
+                    'target':       target,
+                    'outer_top':    outer_top,
+                    'outer_bottom': outer_bot,
+                    'core_top':     core_top,
+                    'core_bottom':  core_bot,
+                    'label':        rec.label_text,
+                    'timestamp':    rec.reversal_time.isoformat(),
+                    'status':       rec.status,  # NEW: Include status for history page
+                })
+            except Exception as record_error:
+                # Log individual record errors but continue processing
+                logger.warning(f"⚠️ Skipping malformed record for {db_symbol} {timeframe}: {record_error}")
+                continue
 
         response = Response({
             'success':   True,
@@ -483,8 +488,16 @@ def get_signal_history(request, symbol):
         return response
 
     except Exception as e:
-        logger.error(f"Error fetching signal history: {e}", exc_info=True)
-        return Response({'success': False, 'error': str(e)}, status=500)
+        logger.error(f"❌ Error fetching signal history for {symbol} {timeframe}: {e}", exc_info=True)
+        # Return empty result instead of 500 error to prevent fluctuating counts
+        return Response({
+            'success':   False,
+            'symbol':    symbol.upper(),
+            'timeframe': timeframe,
+            'count':     0,
+            'signals':   [],
+            'error':     str(e)
+        }, status=200)  # Changed from 500 to 200 to prevent frontend errors
 
 
 @api_view(['POST'])

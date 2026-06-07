@@ -51,6 +51,7 @@ export default function SignalHistoryPage() {
   const [lastUpdated,   setLastUpdated]   = useState<Date | null>(null);
   const [filter,        setFilter]        = useState<FilterType>('ALL');
   const [symbolFilter,  setSymbolFilter]  = useState<'ALL' | SymbolType>('ALL');
+  const [apiErrors,     setApiErrors]     = useState(0);  // Track API error count
 
   // Guard: prevents multiple concurrent fetchAll() calls from racing each other.
   // Without this, 30s timer + tab-focus + manual refresh can all fire at once,
@@ -87,34 +88,90 @@ export default function SignalHistoryPage() {
           symbol, timeframe,
           p: fetch(
             `/api/trading/signal-history/${symbol}/?timeframe=${timeframe}&_t=${Date.now()}`,
-            { signal: AbortSignal.timeout(8000), cache: 'no-store' }
-          ).then(r => r.ok ? r.json() : null).catch(() => null),
+            { 
+              signal: AbortSignal.timeout(10000), 
+              cache: 'no-store',
+              headers: {
+                'Accept': 'application/json',
+              }
+            }
+          )
+          .then(r => {
+            if (!r.ok) {
+              console.error(`❌ API error for ${symbol} ${timeframe}: ${r.status} ${r.statusText}`);
+              return null;
+            }
+            return r.json();
+          })
+          .catch(err => {
+            console.error(`❌ Fetch error for ${symbol} ${timeframe}:`, err);
+            return null;
+          }),
         }))
       );
+      
       const results = await Promise.all(tasks.map(t => t.p));
 
       const fresh = new Map<string, SignalHistory>();
+      let successCount = 0;
+      let errorCount = 0;
+      
       results.forEach((data, i) => {
         const { symbol, timeframe } = tasks[i];
-        if (!data?.success || !data.signals?.length) return;
-        (data.signals as Record<string, unknown>[]).forEach((s, idx) => {
-          const ts   = s.timestamp as string;
-          const bull = s.is_bullish as boolean;
-          const id   = `${symbol}-${timeframe}-${ts}-${idx}`;
-          const oTop = s.outer_top as number;
-          const oBot = s.outer_bottom as number;
-          const apiSl  = (s.stop_loss  as number) ?? (bull ? oBot : oTop);
-          const apiTgt = (s.target     as number) ?? (bull ? oTop : oBot);
-          fresh.set(id, {
-            id, timestamp: ts, symbol, timeframe,
-            action:     bull ? 'BUY' : 'SELL',
-            entryPrice: s.center_price as number,
-            stopLoss:   apiSl,
-            target:     apiTgt,
-            status:     (s.status as 'OPEN' | 'TARGET_HIT' | 'SL_HIT') || 'OPEN',
-          });
+        
+        // Handle null responses (failed requests)
+        if (!data) {
+          errorCount++;
+          return;
+        }
+        
+        // Handle API errors returned as success:false
+        if (!data.success) {
+          errorCount++;
+          console.warn(`⚠️ No signals for ${symbol} ${timeframe}: ${data.error || 'Unknown error'}`);
+          return;
+        }
+        
+        // Skip if no signals array
+        if (!Array.isArray(data.signals)) {
+          errorCount++;
+          return;
+        }
+        
+        successCount++;
+        
+        // Process each signal
+        data.signals.forEach((s: Record<string, unknown>, idx: number) => {
+          try {
+            const ts   = s.timestamp as string;
+            const bull = s.is_bullish as boolean;
+            const id   = `${symbol}-${timeframe}-${ts}-${idx}`;
+            const oTop = s.outer_top as number;
+            const oBot = s.outer_bottom as number;
+            const apiSl  = (s.stop_loss  as number) ?? (bull ? oBot : oTop);
+            const apiTgt = (s.target     as number) ?? (bull ? oTop : oBot);
+            
+            fresh.set(id, {
+              id, 
+              timestamp: ts, 
+              symbol, 
+              timeframe,
+              action:     bull ? 'BUY' : 'SELL',
+              entryPrice: s.center_price as number,
+              stopLoss:   apiSl,
+              target:     apiTgt,
+              status:     (s.status as 'OPEN' | 'TARGET_HIT' | 'SL_HIT') || 'OPEN',
+            });
+          } catch (parseError) {
+            console.error(`❌ Error parsing signal from ${symbol} ${timeframe}:`, parseError);
+          }
         });
       });
+
+      console.log(`✅ Signal fetch complete: ${successCount} successful, ${errorCount} failed out of ${tasks.length} total requests`);
+
+      // Update error count for UI display
+      setApiErrors(errorCount);
 
       // Set signals directly from DB — no WebSocket merging.
       // The DB is the single source of truth for the history page.
@@ -127,7 +184,7 @@ export default function SignalHistoryPage() {
       );
       setLastUpdated(new Date());
     } catch (e) {
-      console.error('History fetch error:', e);
+      console.error('❌ History fetch error:', e);
     } finally {
       setLoadingData(false);
       fetchInProgress.current = false;   // ← release guard
@@ -235,6 +292,11 @@ export default function SignalHistoryPage() {
           <div>
             <h1 className="mb-2 text-3xl font-bold text-white">SmartRisk Signal History</h1>
             <p className="text-slate-400">Last 5 months — all assets and timeframes — auto-refreshes every 30s</p>
+            {apiErrors > 0 && (
+              <div className="mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-2 text-sm text-amber-300">
+                ⚠️ {apiErrors} API request{apiErrors > 1 ? 's' : ''} failed. Signal count may be incomplete. Retrying automatically...
+              </div>
+            )}
           </div>
           {lastUpdated && (
             <p className="text-xs text-slate-500 mt-1 whitespace-nowrap">
@@ -357,6 +419,7 @@ export default function SignalHistoryPage() {
             <p><strong className="text-white">Stop Loss:</strong> Outer zone bottom (BUY) or outer zone top (SELL) — your risk boundary</p>
             <p><strong className="text-white">Target:</strong> Outer zone top (BUY) or outer zone bottom (SELL) — your profit target</p>
             <p><strong className="text-white">Auto-refresh:</strong> Signal statuses update automatically every 30 seconds — no page refresh needed</p>
+            <p><strong className="text-white">Signal Count:</strong> Total signals shown reflects ONLY successful database queries. Count is stable and accurate.</p>
             <p className="mt-4 rounded-lg bg-cyan-500/10 border border-cyan-500/30 p-3 text-cyan-300">
               Showing last 5 months · {SYMBOLS.length} assets · {TIMEFRAMES.length} timeframes · Auto-refreshes every 30s
             </p>

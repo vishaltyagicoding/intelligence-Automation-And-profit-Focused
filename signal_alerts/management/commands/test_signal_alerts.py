@@ -110,8 +110,10 @@ class Command(BaseCommand):
             'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S UTC'),
         }
         
-        notifications_sent = notify_signal_subscribers(test_signal)
-        
+        result = notify_signal_subscribers(test_signal)
+        sent_count, failed_count = result if isinstance(result, tuple) else (result, 0)
+        notifications_sent = sent_count
+
         if notifications_sent > 0:
             self.stdout.write(
                 self.style.SUCCESS(f'✅ Sent {notifications_sent} notification(s) for BTCUSD 1h SELL signal')

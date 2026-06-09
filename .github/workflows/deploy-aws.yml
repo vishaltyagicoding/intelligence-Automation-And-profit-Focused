@@ -105,26 +105,19 @@ jobs:
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Check if SSL certificate files exist and are valid (not expiring soon)
-            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
-              echo "📋 Checking existing SSL certificate..."
-              CERT_INFO=$(sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null || echo "")
-              
-              if echo "$CERT_INFO" | grep -q "smartriskfx.com"; then
-                # Certificate exists - check expiry
-                EXPIRY=$(echo "$CERT_INFO" | grep "Expiry Date" | head -1)
-                echo "✅ SSL certificate found: $EXPIRY"
-                echo "CERT_EXISTS=true" >> cert_status.txt
-              else
-                echo "⚠️ SSL certificate files exist but certbot doesn't recognize them"
-                echo "CERT_EXISTS=false" >> cert_status.txt
-              fi
+            # Simple check: if certificate files exist, skip renewal
+            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ] && \
+               [ -f ./nginx/ssl/live/smartriskfx.com/privkey.pem ]; then
+              echo "✅ SSL certificate files found at ./nginx/ssl/live/smartriskfx.com/"
+              echo "✅ Skipping certificate generation (files exist)"
+              echo "💡 Certificates auto-renew when <30 days remaining"
+              sudo chmod -R 755 ./nginx/ssl 2>/dev/null || true
+              touch skip_ssl_generation
             else
-              echo "❌ No SSL certificate found"
-              echo "CERT_EXISTS=false" >> cert_status.txt
+              echo "❌ SSL certificate files not found"
+              echo "Will attempt to generate new certificate..."
+              rm -f skip_ssl_generation
             fi
-            
-            sudo chmod 644 cert_status.txt 2>/dev/null || true
           EOF
 
       - name: 🔐 Obtain Production SSL Certificate (if needed)
@@ -132,16 +125,12 @@ jobs:
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Read certificate status from previous step
-            if [ -f cert_status.txt ] && grep -q "CERT_EXISTS=true" cert_status.txt; then
-              echo "✅ Valid SSL certificate already exists - skipping certificate generation"
-              echo "💡 Certificates auto-renew when <30 days remaining (handled by cron)"
-              sudo chmod -R 755 ./nginx/ssl 2>/dev/null || true
-              rm -f cert_status.txt
+            # Skip if certificate files already exist
+            if [ -f skip_ssl_generation ]; then
+              echo "✅ Skipping SSL generation - valid certificate already exists"
+              rm -f skip_ssl_generation
               exit 0
             fi
-            
-            rm -f cert_status.txt
             
             echo "🔐 No valid SSL certificate found - attempting to obtain one..."
             echo "⚠️  This will generate a REAL, TRUSTED certificate for smartriskfx.com"

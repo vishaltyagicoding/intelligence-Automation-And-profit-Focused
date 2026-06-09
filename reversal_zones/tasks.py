@@ -669,6 +669,7 @@ def check_signal_statuses(self):
 
         if not open_signals:
             logger.info("✅ No open signals with SL/Target to check")
+            return {"status": "ok", "checked": 0, "updated": 0}
 
         # ── Group by symbol ────────────────────────────────────────────────────
         signals_by_symbol: dict[str, list] = {}

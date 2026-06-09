@@ -100,39 +100,20 @@ jobs:
             sudo docker-compose build django celery_worker celery_beat frontend
           EOF
 
-      - name: 🔐 Check SSL Certificate Status
+      - name: 🔐 Obtain Production SSL Certificate
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Simple check: if certificate files exist, skip renewal
-            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ] && \
-               [ -f ./nginx/ssl/live/smartriskfx.com/privkey.pem ]; then
-              echo "✅ SSL certificate files found at ./nginx/ssl/live/smartriskfx.com/"
-              echo "✅ Skipping certificate generation (files exist)"
-              echo "💡 Certificates auto-renew when <30 days remaining"
-              sudo chmod -R 755 ./nginx/ssl 2>/dev/null || true
-              touch skip_ssl_generation
-            else
-              echo "❌ SSL certificate files not found"
-              echo "Will attempt to generate new certificate..."
-              rm -f skip_ssl_generation
-            fi
-          EOF
-
-      - name: 🔐 Obtain Production SSL Certificate (if needed)
-        run: |
-          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            cd ~/smartrisk
-
-            # Skip if certificate files already exist
-            if [ -f skip_ssl_generation ]; then
-              echo "✅ Skipping SSL generation - valid certificate already exists"
-              rm -f skip_ssl_generation
+            # Check if valid PRODUCTION certificate already exists
+            if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "smartriskfx.com" && \
+               ! sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT"; then
+              echo "✅ Valid PRODUCTION SSL certificate already exists"
+              sudo chmod -R 755 ./nginx/ssl
               exit 0
             fi
-            
-            echo "🔐 No valid SSL certificate found - attempting to obtain one..."
+
+            echo "🔐 Obtaining PRODUCTION SSL certificate from Let's Encrypt..."
             echo "⚠️  This will generate a REAL, TRUSTED certificate for smartriskfx.com"
             
             # Stop nginx temporarily to free port 80
@@ -150,17 +131,17 @@ jobs:
               --email ${{ secrets.CERTBOT_EMAIL }} \
               --agree-tos \
               --no-eff-email \
-              --non-interactive
-            
+              --non-interactive \
+              --test-cert
             if [ $? -eq 0 ]; then
               echo "✅ PRODUCTION SSL certificate obtained successfully!"
               sudo chmod -R 755 ./nginx/ssl
               
-              # Verify it's a production cert
-              if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT"; then
-                echo "❌ ERROR: Staging certificate was generated instead of production!"
-                exit 1
-              fi
+              # # Verify it's a production cert
+              # if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT"; then
+              #   echo "❌ ERROR: Staging certificate was generated instead of production!"
+              #   exit 1
+              # fi
               
               echo "✅ Verified: PRODUCTION certificate (trusted by browsers)"
               

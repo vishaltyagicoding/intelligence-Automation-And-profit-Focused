@@ -100,20 +100,50 @@ jobs:
             sudo docker-compose build django celery_worker celery_beat frontend
           EOF
 
-      - name: 🔐 Obtain Production SSL Certificate
+      - name: 🔐 Check SSL Certificate Status
         run: |
           ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
             cd ~/smartrisk
 
-            # Check if valid PRODUCTION certificate already exists
-            if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "smartriskfx.com" && \
-               ! sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT"; then
-              echo "✅ Valid PRODUCTION SSL certificate already exists"
-              sudo chmod -R 755 ./nginx/ssl
+            # Check if SSL certificate files exist and are valid (not expiring soon)
+            if [ -f ./nginx/ssl/live/smartriskfx.com/fullchain.pem ]; then
+              echo "📋 Checking existing SSL certificate..."
+              CERT_INFO=$(sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null || echo "")
+              
+              if echo "$CERT_INFO" | grep -q "smartriskfx.com"; then
+                # Certificate exists - check expiry
+                EXPIRY=$(echo "$CERT_INFO" | grep "Expiry Date" | head -1)
+                echo "✅ SSL certificate found: $EXPIRY"
+                echo "CERT_EXISTS=true" >> cert_status.txt
+              else
+                echo "⚠️ SSL certificate files exist but certbot doesn't recognize them"
+                echo "CERT_EXISTS=false" >> cert_status.txt
+              fi
+            else
+              echo "❌ No SSL certificate found"
+              echo "CERT_EXISTS=false" >> cert_status.txt
+            fi
+            
+            sudo chmod 644 cert_status.txt 2>/dev/null || true
+          EOF
+
+      - name: 🔐 Obtain Production SSL Certificate (if needed)
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            cd ~/smartrisk
+
+            # Read certificate status from previous step
+            if [ -f cert_status.txt ] && grep -q "CERT_EXISTS=true" cert_status.txt; then
+              echo "✅ Valid SSL certificate already exists - skipping certificate generation"
+              echo "💡 Certificates auto-renew when <30 days remaining (handled by cron)"
+              sudo chmod -R 755 ./nginx/ssl 2>/dev/null || true
+              rm -f cert_status.txt
               exit 0
             fi
-
-            echo "🔐 Obtaining PRODUCTION SSL certificate from Let's Encrypt..."
+            
+            rm -f cert_status.txt
+            
+            echo "🔐 No valid SSL certificate found - attempting to obtain one..."
             echo "⚠️  This will generate a REAL, TRUSTED certificate for smartriskfx.com"
             
             # Stop nginx temporarily to free port 80
@@ -131,8 +161,8 @@ jobs:
               --email ${{ secrets.CERTBOT_EMAIL }} \
               --agree-tos \
               --no-eff-email \
-              --non-interactive \
-              # --test-cert
+              --non-interactive
+            
             if [ $? -eq 0 ]; then
               echo "✅ PRODUCTION SSL certificate obtained successfully!"
               sudo chmod -R 755 ./nginx/ssl

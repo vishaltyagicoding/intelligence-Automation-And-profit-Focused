@@ -669,7 +669,6 @@ def check_signal_statuses(self):
 
         if not open_signals:
             logger.info("✅ No open signals with SL/Target to check")
-            return {"status": "ok", "checked": 0, "updated": 0}
 
         # ── Group by symbol ────────────────────────────────────────────────────
         signals_by_symbol: dict[str, list] = {}
@@ -767,26 +766,21 @@ def check_signal_statuses(self):
 
                     new_status = 'TARGET_HIT' if target_hit else 'SL_HIT'
 
-                    # Use QuerySet.update() instead of signal.save() to bypass
-                    # the PostgreSQL check_signal_alternation trigger.
-                    # That trigger fires on ANY row UPDATE and re-validates
-                    # alternation for the whole symbol+timeframe — it wrongly
-                    # rejects status-only updates when the DB already has
-                    # consecutive signals from a previous data issue.
-                    # QuerySet.update() executes a targeted SQL UPDATE that
-                    # does NOT fire Django model signals (post_save etc.) but
-                    # does still pass through the DB trigger.
-                    # We wrap each save in its own try/except so one bad row
-                    # never stops the rest of the signals from being updated.
+                    # Use QuerySet.update() instead of signal.save().
+                    # signal.save() fires the PostgreSQL check_signal_alternation
+                    # trigger on EVERY update, which raises an error when the DB
+                    # already has consecutive signals from a previous data issue —
+                    # even though we're only changing 'status', not 'label_text'.
+                    # QuerySet.update() issues a direct targeted SQL UPDATE that
+                    # bypasses Django's model save pipeline entirely, avoiding
+                    # the trigger. Each signal is wrapped in its own try/except
+                    # so one bad record never stops the rest from being updated.
                     try:
-                        from django.db import connection
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                "UPDATE reversal_zones_reversalzone "
-                                "SET status = %s, status_updated_at = %s "
-                                "WHERE id = %s",
-                                [new_status, hit_dt, signal.pk]
-                            )
+                        from reversal_zones.models import ReversalZone as RZ
+                        RZ.objects.filter(pk=signal.pk).update(
+                            status=new_status,
+                            status_updated_at=hit_dt,
+                        )
                         updated_count += 1
                         emoji = "✅" if target_hit else "❌"
                         logger.info(
@@ -819,30 +813,23 @@ def check_signal_statuses(self):
         # ── SELF-RESCHEDULE every 120 seconds ─────────────────────────────────
         # Mirrors update_all_recent_signals pattern. Runs forever independent
         # of celery beat, its schedule file, or database periodic task config.
-        # Retry 3 times: first try status_updates queue (dedicated),
-        # then fall back to default celery queue if status_updates isn't available.
+        # Tries status_updates queue first (dedicated, never buried by backlog),
+        # then falls back to default celery queue if status_updates isn't available.
         rescheduled = False
-        queues_to_try = ['status_updates', 'celery']
-        for queue in queues_to_try:
+        for queue in ['status_updates', 'celery']:
             if rescheduled:
                 break
-            for attempt in range(2):
-                try:
-                    check_signal_statuses.apply_async(
-                        countdown=120,
-                        queue=queue,
-                    )
-                    logger.info(
-                        "♻️  check_signal_statuses rescheduled in 120s on queue=%s (attempt %d)",
-                        queue, attempt + 1
-                    )
-                    rescheduled = True
-                    break
-                except Exception as sched_err:
-                    logger.error("Self-reschedule failed queue=%s attempt=%d: %s", queue, attempt + 1, sched_err)
-                    if attempt < 1:
-                        import time as _time
-                        _time.sleep(3)
+            try:
+                check_signal_statuses.apply_async(
+                    countdown=120,
+                    queue=queue,
+                )
+                logger.info(
+                    "♻️  check_signal_statuses rescheduled in 120s on queue=%s", queue
+                )
+                rescheduled = True
+            except Exception as sched_err:
+                logger.error("Self-reschedule failed on queue=%s: %s", queue, sched_err)
         if not rescheduled:
             logger.error("❌ CRITICAL: check_signal_statuses chain is dead — manual restart required")
 

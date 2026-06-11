@@ -4,7 +4,6 @@ Sends INSTANT email notifications when new signals are created.
 """
 import logging
 from datetime import datetime, timedelta
-from threading import Thread
 
 import pytz
 from django.db.models.signals import post_save
@@ -78,10 +77,13 @@ def send_instant_email_on_new_signal(sender, instance, created, **kwargs):
     3. Redis dedup uses the fingerprint as a safety net against the rare case
        where the same DB row is somehow created twice. TTL = 7 days.
 
-    4. Redis is marked as sent AFTER email succeeds (not before).
-       Marking before meant a failed email would permanently silence that signal.
+    4. Redis is marked BEFORE the Celery task runs (at queue time).
+       The task retries up to 3 times if delivery fails — Redis prevents
+       re-queueing the same signal fingerprint on duplicate post_save calls.
 
-    5. Email runs in a background Thread — post_save returns instantly.
+    5. Email is dispatched as a Celery task on the 'emails' queue.
+       This replaces the old daemon Thread approach which caused 1-4 hour
+       delays due to CPU starvation inside loaded worker processes.
     """
     if not created:
         return
@@ -128,8 +130,6 @@ def send_instant_email_on_new_signal(sender, instance, created, **kwargs):
 
     # ── Build signal_data ─────────────────────────────────────────────────────
     try:
-        from signal_alerts.email_utils import notify_signal_subscribers
-
         user_symbol = BINANCE_TO_USER.get(instance.symbol.upper(), instance.symbol)
         is_bull     = instance.is_bullish
         entry       = round(float(instance.center_price), 2)
@@ -161,38 +161,33 @@ def send_instant_email_on_new_signal(sender, instance, created, **kwargs):
         )
         return
 
-    # ── Send emails in background Thread (non-blocking post_save) ────────────
-    # Redis is marked AFTER successful send to ensure no signal is silently dropped.
-
-    def _send_emails():
-        try:
-            sent = notify_signal_subscribers(signal_data)
-            # Mark sent in Redis ONLY after successful send
-            _mark_email_sent(fingerprint)
-            if sent > 0:
-                logger.info(
-                    "✅ EMAIL SENT: %d alert(s) for %s %s %s @ %.2f (SL=%.2f TP=%.2f)",
-                    sent, user_symbol, instance.timeframe,
-                    signal_data['signal_type'], entry, stop_loss, target,
-                )
-            else:
-                logger.info(
-                    "ℹ️  No subscribers for %s %s %s — no emails sent",
-                    user_symbol, instance.timeframe, signal_data['signal_type'],
-                )
-                # Still mark sent so we don't retry for same signal
-                _mark_email_sent(fingerprint)
-        except Exception as exc:
-            # Do NOT mark Redis on exception — allow retry on next task run
-            logger.error(
-                "❌ Email send FAILED [%s]: %s", fingerprint, exc, exc_info=True
-            )
-
-    Thread(target=_send_emails, daemon=True).start()
-    logger.info(
-        "🔔 Email thread started: %s %s %s @ %.2f",
-        user_symbol, instance.timeframe, signal_data['signal_type'], entry,
-    )
+    # ── Dispatch email via Celery task (NOT a daemon Thread) ─────────────────
+    # Root cause of the 1-4 hour email delays was sending via daemon Thread
+    # inside a heavily loaded Celery prefork worker process. daemon Threads
+    # get starved of CPU time when all 4 worker slots are busy, causing SMTP
+    # connections to sit waiting for OS scheduling for hours.
+    #
+    # FIX: Use a Celery task on the dedicated 'emails' queue. This queue is
+    # never blocked by signal processing tasks (which use the 'celery' queue).
+    # Full retry support (3 attempts, 30s apart) handles transient SMTP errors.
+    try:
+        from signal_alerts.tasks import send_signal_alert_task
+        send_signal_alert_task.apply_async(
+            args=[signal_data],
+            queue='emails',
+            priority=9,   # highest priority — emails go first
+        )
+        logger.info(
+            "🔔 Email task queued: %s %s %s @ %.2f",
+            user_symbol, instance.timeframe, signal_data['signal_type'], entry,
+        )
+        # Mark Redis immediately when task is queued (not after delivery)
+        # If the task fails it retries — Redis prevents re-queueing for same signal
+        _mark_email_sent(fingerprint)
+    except Exception as exc:
+        logger.error(
+            "❌ Failed to queue email task for %s: %s", fingerprint, exc, exc_info=True
+        )
 
 
 # ── One-time Redis flush helper (run from Django shell after deploy) ──────────

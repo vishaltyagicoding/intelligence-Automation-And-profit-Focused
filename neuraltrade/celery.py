@@ -13,11 +13,18 @@ app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
 # ── Queue routing ──────────────────────────────────────────────────────────────
-# check_signal_statuses gets its own dedicated queue 'status_updates'.
-# This means it NEVER competes with the high-volume update_recent_signals tasks
-# that flood the default 'celery' queue with hundreds of thousands of messages.
+# Each queue is isolated so high-volume tasks never starve critical ones.
+#
+# 'celery'        — default queue for signal processing (high volume)
+# 'status_updates'— check_signal_statuses (runs every 2 min, must never be buried)
+# 'emails'        — signal alert email delivery (must be near-instant, highest priority)
+#
+# ROOT CAUSE FIX: emails were previously sent via daemon Thread inside heavily
+# loaded prefork workers, causing 1-4 hour delays from CPU starvation.
+# Moving to a dedicated 'emails' queue gives emails their own processing lane.
 app.conf.task_routes = {
-    'reversal_zones.tasks.check_signal_statuses': {'queue': 'status_updates'},
+    'reversal_zones.tasks.check_signal_statuses':    {'queue': 'status_updates'},
+    'signal_alerts.tasks.send_signal_alert_task':    {'queue': 'emails'},
 }
 app.conf.task_default_queue = 'celery'
 

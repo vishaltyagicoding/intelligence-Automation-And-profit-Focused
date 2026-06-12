@@ -65,7 +65,7 @@ jobs:
                 cat > .env << 'ENVFILE'
           SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
           DEBUG=False
-          ALLOWED_HOSTS=smartriskfx.com,www.smartriskfx.com,13.250.19.107,localhost,127.0.0.1
+          ALLOWED_HOSTS=smartriskfx.com,www.smartriskfx.com,52.221.219.7,localhost,127.0.0.1
           CSRF_TRUSTED_ORIGINS=https://smartriskfx.com,https://www.smartriskfx.com
           DB_NAME=smartrisk_db
           DB_USER=smartrisk_user
@@ -169,7 +169,7 @@ jobs:
             else
               echo "❌ Failed to obtain PRODUCTION SSL certificate"
               echo "Common causes:"
-              echo "  1. Domain not pointing to this server IP (13.250.19.107)"
+              echo "  1. Domain not pointing to this server IP (52.221.219.7)"
               echo "  2. Port 80 still in use"
               echo "  3. Let's Encrypt rate limit reached"
               echo ""

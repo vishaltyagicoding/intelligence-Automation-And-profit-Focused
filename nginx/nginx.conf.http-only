@@ -33,7 +33,7 @@ http {
     # HTTP Server (No SSL for now)
     server {
         listen 80;
-        server_name smartriskfx.com www.smartriskfx.com 54.183.178.141 localhost;
+        server_name smartriskfx.com www.smartriskfx.com 52.221.219.7 localhost;
 
         # Security Headers
         add_header X-Frame-Options "SAMEORIGIN" always;

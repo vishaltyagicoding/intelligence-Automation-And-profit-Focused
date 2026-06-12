@@ -1,0 +1,193 @@
+================================================================================
+🚀 SMARTRISK MIGRATION - QUICK START COMMANDS
+================================================================================
+
+Server IP: 52.221.219.7
+PEM Key: singapore-pem-file.pem
+Region: Singapore (ap-southeast-1)
+
+================================================================================
+STEP 1: UPDATE GITHUB SECRETS (DO THIS FIRST!)
+================================================================================
+
+Go to: GitHub → Repository → Settings → Secrets → Actions
+
+Update these TWO secrets:
+
+1. EC2_SSH_KEY
+   PowerShell command: cat singapore-pem-file.pem
+   → Copy ENTIRE output and paste in GitHub
+
+2. EC2_HOST
+   → Value: 52.221.219.7
+
+================================================================================
+STEP 2: COMMIT AND DEPLOY
+================================================================================
+
+git add .
+git commit -m "Migrate to new Singapore EC2 server (52.221.219.7)"
+git push origin main
+
+→ Monitor deployment at: https://github.com/your-repo/actions
+→ Wait 10-15 minutes for completion
+
+================================================================================
+STEP 3: SSH TO SERVER (TEST CONNECTION)
+================================================================================
+
+ssh -i singapore-pem-file.pem ubuntu@52.221.219.7
+
+If you get "Permission denied":
+→ See EC2_MIGRATION_GUIDE.md Section 9.6 for PEM key permission fix
+
+================================================================================
+STEP 4: VERIFY DEPLOYMENT
+================================================================================
+
+# Check Docker services
+cd ~/smartrisk
+sudo docker-compose ps
+
+# Expected: All services show "Up" and "healthy"
+
+# Check logs
+sudo docker-compose logs -f
+
+================================================================================
+STEP 5: TEST WEBSITE
+================================================================================
+
+Browser tests:
+✅ https://smartriskfx.com
+✅ https://smartriskfx.com/join
+✅ https://smartriskfx.com/admin/
+   Username: alberttyagi
+   Password: SmartRisk@2026!
+
+Command line test:
+curl https://smartriskfx.com/health/
+→ Expected: {"status": "healthy"}
+
+================================================================================
+STEP 6: GENERATE HISTORICAL SIGNALS (IMPORTANT!)
+================================================================================
+
+# SSH to server
+ssh -i singapore-pem-file.pem ubuntu@52.221.219.7
+cd ~/smartrisk
+
+# Run historical signal generator
+sudo docker-compose exec django python generate_historical_signals.py
+
+→ Wait 10-15 minutes
+→ Expected output: ~200-400 signals generated
+
+# Verify results
+Visit: https://smartriskfx.com/history
+→ Should show historical signals
+
+================================================================================
+VERIFICATION CHECKLIST
+================================================================================
+
+After all steps:
+✅ Website loads via HTTPS
+✅ Green padlock (valid SSL certificate)
+✅ All Docker services healthy
+✅ Admin panel accessible
+✅ History page shows 200-400 signals
+✅ Charts display reversal markers
+✅ No errors in logs
+
+================================================================================
+QUICK COMMANDS REFERENCE
+================================================================================
+
+# SSH to server
+ssh -i singapore-pem-file.pem ubuntu@52.221.219.7
+
+# Navigate to project
+cd ~/smartrisk
+
+# Check services
+sudo docker-compose ps
+
+# View logs (all services)
+sudo docker-compose logs -f
+
+# View logs (specific service)
+sudo docker-compose logs -f django
+
+# Restart all services
+sudo docker-compose restart
+
+# Restart specific service
+sudo docker-compose restart django
+
+# Run Django command
+sudo docker-compose exec django python manage.py <command>
+
+# Access database
+sudo docker-compose exec db psql -U smartrisk_user smartrisk_db
+
+# Check SSL certificate
+sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt \
+  certbot/certbot certificates
+
+# Generate historical signals
+sudo docker-compose exec django python generate_historical_signals.py
+
+# Update signal statuses
+sudo docker-compose exec django python manage.py update_signal_statuses
+
+# Check signal count
+sudo docker-compose exec db psql -U smartrisk_user smartrisk_db \
+  -c "SELECT COUNT(*) FROM reversal_zones;"
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Issue: SSH Permission Denied
+Fix: Run in PowerShell as Administrator
+    $pemFile = "D:\...\singapore-pem-file.pem"
+    icacls $pemFile /inheritance:r
+    icacls $pemFile /grant:r "${env:USERNAME}:F"
+
+Issue: SSL Certificate Failed
+Fix: Wait 30 mins for DNS propagation, then re-run deployment
+
+Issue: Services Not Starting
+Fix: sudo docker-compose down
+     sudo docker-compose build --no-cache
+     sudo docker-compose up -d
+
+Issue: Historical Signals Fail
+Fix: Drop alternation trigger first:
+     sudo docker-compose exec db psql -U smartrisk_user -d smartrisk_db \
+       -c "DROP TRIGGER IF EXISTS enforce_signal_alternation ON reversal_zones CASCADE;"
+
+================================================================================
+SUPPORT
+================================================================================
+
+Email: alberttyagi123@gmail.com, smarttriskfx@gmail.com
+Full Guide: EC2_MIGRATION_GUIDE.md
+Checklist: MIGRATION_CHECKLIST.md
+Signal Guide: GENERATE_HISTORY_GUIDE.md
+Summary: MIGRATION_COMPLETE_SUMMARY.md
+
+================================================================================
+🎉 YOU'RE ALL SET!
+================================================================================
+
+1. Update GitHub secrets (EC2_HOST and EC2_SSH_KEY)
+2. Push code to trigger deployment
+3. Wait 10-15 minutes
+4. Run historical signal generator
+5. Verify everything works
+
+Total time: ~35-45 minutes
+
+Good luck! 🚀

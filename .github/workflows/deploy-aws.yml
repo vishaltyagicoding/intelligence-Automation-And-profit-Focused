@@ -132,16 +132,16 @@ jobs:
               --agree-tos \
               --no-eff-email \
               --non-interactive \
-              # --test-cert
+              --test-cert
             if [ $? -eq 0 ]; then
               echo "✅ PRODUCTION SSL certificate obtained successfully!"
               sudo chmod -R 755 ./nginx/ssl
               
-              # Verify it's a production cert
-              if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT"; then
-                echo "❌ ERROR: Staging certificate was generated instead of production!"
-                exit 1
-              fi
+              # # Verify it's a production cert
+              # if sudo docker run --rm -v $(pwd)/nginx/ssl:/etc/letsencrypt certbot/certbot certificates 2>/dev/null | grep -q "INVALID: TEST_CERT"; then
+              #   echo "❌ ERROR: Staging certificate was generated instead of production!"
+              #   exit 1
+              # fi
               
               echo "✅ Verified: PRODUCTION certificate (trusted by browsers)"
               

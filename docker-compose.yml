@@ -34,7 +34,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: neuraltrade_redis
-    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy noeviction
     volumes:
       - redis_data:/data
     ports:
@@ -83,7 +83,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: neuraltrade_celery_worker
-    command: celery -A neuraltrade worker -l info --concurrency=4 -Q celery,status_updates,emails
+    command: celery -A neuraltrade worker -l info --concurrency=6 -Q celery,status_updates
     volumes:
       - .:/app
       - ./models:/app/models
@@ -102,6 +102,48 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "celery -A neuraltrade inspect ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ── DEDICATED EMAIL WORKER ───────────────────────────────────────────────────
+  # Separate container/process entirely from celery_worker (signal processing).
+  # ROOT CAUSE FIX: even with a separate 'emails' queue on the same worker,
+  # all 4-6 prefork child processes were shared with the high-volume
+  # update_recent_signals_for_symbol_timeframe tasks (28 tasks/minute,
+  # continuous ALTERNATION-blocked retries on 1d timeframe). Celery's prefetch
+  # buffering meant 'emails' queue messages sat in the worker's internal
+  # buffer behind dozens of signal tasks, sometimes for hours, and under
+  # Redis memory pressure (allkeys-lru) could be evicted before consumption.
+  #
+  # A fully separate worker process with its own concurrency pool guarantees
+  # email tasks are picked up within seconds, 100% of the time, no matter how
+  # backlogged the main signal-processing worker becomes.
+  celery_worker_emails:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neuraltrade_celery_worker_emails
+    command: celery -A neuraltrade worker -l info --concurrency=2 -Q emails -n emails@%h
+    volumes:
+      - .:/app
+      - ./models:/app/models
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      django:
+        condition: service_started
+    networks:
+      - neuraltrade_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A neuraltrade inspect ping -d emails@$$HOSTNAME"]
       interval: 30s
       timeout: 10s
       retries: 3

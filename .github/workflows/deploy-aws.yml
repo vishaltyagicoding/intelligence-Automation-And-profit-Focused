@@ -1,4 +1,4 @@
-# final code for test deploy-aws.yml file without 5 attempt you can push many times
+# final code code for test deploy-aws.yml file without 5 attempt you can push many times
 
 name: Deploy SmartRisk to AWS EC2
 

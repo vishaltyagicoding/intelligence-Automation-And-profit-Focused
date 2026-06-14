@@ -533,7 +533,7 @@ def calculate_all_history():
 
 
 @shared_task(bind=True, max_retries=0)
-def update_all_recent_signals(self):
+def update_all_recent_signals(self, chain_id: str = None):
     """
     SELF-PERPETUATING signal update — never depends solely on celery-beat.
 
@@ -543,15 +543,60 @@ def update_all_recent_signals(self):
                  so it keeps running even if celery-beat crashes or is misconfigured
       Layer 3 — Redis distributed lock prevents overlap if both layers fire at once
 
+    CHAIN-GENERATION DEDUPLICATION (prevents accumulation of parallel chains):
+      Every self-perpetuating chain carries a `chain_id` (UUID). Redis key
+      `chain:active_id` always holds the ID of the MOST RECENT chain link.
+
+      - When celery-beat triggers this task, chain_id=None → this execution
+        ALWAYS becomes the new "active" chain (overwrites chain:active_id with
+        a fresh UUID) and reschedules itself carrying that UUID forward.
+      - When the SELF-RESCHEDULE triggers this task, chain_id is set. If it no
+        longer matches chain:active_id, this chain link is STALE (an orphan
+        from a previous deploy/restart) — it does its work ONE more time
+        (harmless, idempotent) but does NOT reschedule itself, so it dies out.
+
+      Over time (≤90s after a restart) all orphan chains naturally terminate,
+      leaving exactly ONE active chain running at ~1/min (matching celery-beat).
+      This makes the previous symptom — 5-18 parallel "Queued 28" cycles/min,
+      which caused individual (symbol,timeframe) pairs like PAXGUSDT 5m to
+      go 30-40 minutes between detections — structurally impossible.
+
     If celery-beat is broken: task still runs every 60 sec via self-scheduling.
     If celery-worker is broken: celery-beat re-queues on worker recovery.
     Both broken simultaneously: monitoring alert fires (see HEARTBEAT_KEY in Redis).
     """
+    import uuid as _uuid
+
     r = None
     lock_acquired = False
+    is_current_chain = True  # default: assume current unless proven stale
+
     try:
         r = _get_task_redis()
-        # ── Distributed lock — prevent two instances running simultaneously ──
+
+        # ── Chain-generation check ────────────────────────────────────────────
+        if chain_id is None:
+            # Triggered by celery-beat (or manual run) — this becomes the new chain
+            chain_id = str(_uuid.uuid4())
+            r.set('chain:active_id', chain_id, ex=300)  # 5 min TTL safety net
+            logger.debug("🔗 New active chain started: %s", chain_id)
+        else:
+            active_id = r.get('chain:active_id')
+            if active_id is not None:
+                if isinstance(active_id, bytes):
+                    active_id = active_id.decode('utf-8')
+                if active_id != chain_id:
+                    is_current_chain = False
+                    logger.info(
+                        "🔚 Orphan chain link %s detected (active=%s) — "
+                        "running once more, then terminating.",
+                        chain_id, active_id,
+                    )
+            # If active_id is None (Redis was flushed), be conservative:
+            # treat this chain as current so the system doesn't go fully idle.
+            # It will be reconciled within 60s by celery-beat's next trigger.
+
+        # ── Distributed lock — prevent overlap within the same generation ────
         lock_acquired = r.set(LOCK_KEY, "1", nx=True, ex=90)
         if not lock_acquired:
             logger.debug("update_all_recent_signals: skipping (another instance running)")
@@ -563,6 +608,7 @@ def update_all_recent_signals(self):
     except Exception as redis_err:
         logger.warning("Redis unavailable in update_all_recent_signals: %s", redis_err)
         # Continue anyway — signal detection is more important than Redis
+        # Without Redis we can't check chain generation — assume current.
 
     logger.info("🔄 Signal update starting (self-perpetuating)...")
     count = 0
@@ -582,17 +628,23 @@ def update_all_recent_signals(self):
             except Exception:
                 pass
 
-        # ── LAYER 2: Self-reschedule in 60 seconds ────────────────────────────
-        # This runs regardless of celery-beat status.
-        # Even if someone accidentally changes back to DatabaseScheduler or
-        # deletes the PeriodicTask, signals will keep running every 60 seconds.
-        try:
-            update_all_recent_signals.apply_async(countdown=60)
-            logger.debug("♻️ Self-rescheduled in 60 seconds")
-        except Exception as sched_err:
-            logger.error("Self-reschedule failed (beat is now the only trigger): %s", sched_err)
+        # ── LAYER 2: Self-reschedule in 60 seconds — ONLY if still current ────
+        # Orphan chains (is_current_chain=False) do their work above (harmless,
+        # idempotent — duplicate signal-check tasks are cheap and safe) but
+        # stop rescheduling here, so they terminate after this one execution.
+        if is_current_chain:
+            try:
+                update_all_recent_signals.apply_async(
+                    args=[chain_id],
+                    countdown=60,
+                )
+                logger.debug("♻️ Self-rescheduled in 60 seconds [chain=%s]", chain_id)
+            except Exception as sched_err:
+                logger.error("Self-reschedule failed (beat is now the only trigger): %s", sched_err)
+        else:
+            logger.debug("🔚 Orphan chain %s terminated (not rescheduling)", chain_id)
 
-    return {"queued": count}
+    return {"queued": count, "chain_id": chain_id, "is_current_chain": is_current_chain}
 
 
 # ── Backward-compatible aliases ───────────────────────────────────────────────
